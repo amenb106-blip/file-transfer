@@ -2,7 +2,7 @@
 
 React and TypeScript frontend for the file-transfer project.
 
-Lets you select a file, enter the upload passcode, and save a pending transfer record through the Python API. File bytes are not uploaded yet.
+Lets you pick a file, enter the upload passcode, upload the file directly to S3, and get a share link. Share links open a download page.
 
 See the project-root README for backend setup and current limitations.
 
