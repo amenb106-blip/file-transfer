@@ -12,7 +12,7 @@ A web app for sending a file from one device to another with a temporary link.
 4. The browser asks the backend to complete the transfer. The backend checks that the file exists in S3 with the expected size, marks the transfer `ready`, and returns a random share token.
 5. The share link (`/d/<token>`) opens a download page. When the user clicks **Download**, the backend checks the token and expiry, counts the download, and returns an S3 download URL that is valid for 60 seconds and keeps the original filename.
 
-Transfers expire one hour after they are created. Only a SHA-256 hash of each share token is stored in the database.
+Transfers expire ten minutes after they are created. Only a SHA-256 hash of each share token is stored in the database.
 
 ## What works
 

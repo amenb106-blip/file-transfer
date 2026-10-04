@@ -46,7 +46,7 @@ class Transfer(Base):
     expires_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc) + timedelta(hours=1),
+        default=lambda: datetime.now(timezone.utc) + timedelta(minutes=10),
     )
     download_count = Column(Integer, nullable=False, default=0)
 

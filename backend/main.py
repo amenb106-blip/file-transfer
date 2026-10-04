@@ -19,7 +19,7 @@ from storage import StorageNotConfigured, get_s3
 
 app = FastAPI()
 MAX_FILE_SIZE = 25 * 1024 * 1024
-TRANSFER_LIFETIME = timedelta(hours=1)
+TRANSFER_LIFETIME = timedelta(minutes=10)
 passcode_header = APIKeyHeader(name="X-Upload-Passcode", auto_error=False)
 ShareToken = Annotated[str, Path(min_length=1, max_length=128)]
 

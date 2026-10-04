@@ -111,7 +111,7 @@ def test_create_transfer_saves_pending_metadata(setup, size):
     data = response.json()
     UUID(data["id"])
     assert data["status"] == "pending"
-    assert datetime.fromisoformat(data["expires_at"]) - datetime.fromisoformat(data["created_at"]) == timedelta(hours=1)
+    assert datetime.fromisoformat(data["expires_at"]) - datetime.fromisoformat(data["created_at"]) == timedelta(minutes=10)
     assert "s3_key" not in data and "share_token_hash" not in data
     with Session(test_engine) as session:
         record = session.get(Transfer, data["id"])

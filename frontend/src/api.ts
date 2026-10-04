@@ -48,10 +48,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json()
 }
 
-export function checkHealth(signal: AbortSignal) {
-  return request<{ status: string }>('/api/health', { signal })
-}
-
 export function createTransfer(file: File, passcode: string) {
   return request<CreatedTransfer>('/api/transfers', {
     method: 'POST',
