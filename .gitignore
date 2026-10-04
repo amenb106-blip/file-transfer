@@ -11,4 +11,3 @@ node_modules/
 dist/
 .vercel/
 PROJECT_PLAN.md
-public/

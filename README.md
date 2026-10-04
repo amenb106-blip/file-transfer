@@ -131,9 +131,9 @@ npm run lint
 
 The repository deploys as one Vercel project:
 
-- `app.py` is the entrypoint Vercel looks for. It loads the FastAPI app from `backend/`, which becomes a single Vercel Function.
+- `app.py` is the entrypoint Vercel looks for. It loads the FastAPI app from `backend/`, which becomes a single Vercel Function, and serves the built frontend with `app.frontend()`. Vercel moves those files to its CDN, and page addresses such as `/d/<token>` get `index.html`.
 - `requirements.txt` lists only the packages the deployed app needs.
-- `vercel.json` builds the frontend into `public/` (served from Vercel's CDN), sends `/d/<token>` links to the React page, and keeps the frontend and tests out of the function.
+- `vercel.json` builds the frontend and keeps `node_modules`, frontend source, and tests out of the function.
 
 In the Vercel project settings, add the same environment variables as `backend/.env`: `DATABASE_URL`, `UPLOAD_PASSCODE`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, and `S3_BUCKET`.
 
