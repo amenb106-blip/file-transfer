@@ -14,7 +14,6 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-# Set before importing the app so tests never connect to the real database.
 os.environ["DATABASE_URL"] = "sqlite://"
 
 from db import Base, Transfer
@@ -28,7 +27,6 @@ HEADERS = {"X-Upload-Passcode": TEST_PASSCODE}
 
 @pytest.fixture
 def s3(monkeypatch):
-    # Fake credentials so a test can never reach the real AWS account.
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
     monkeypatch.delenv("AWS_SESSION_TOKEN", raising=False)
@@ -98,9 +96,6 @@ def all_transfers(test_engine):
 def test_health(setup):
     client, _ = setup
     assert client.get("/api/health").json() == {"status": "ok"}
-
-
-# --- Creating a transfer ---
 
 
 @pytest.mark.parametrize("size", [1, MAX_FILE_SIZE])
@@ -193,9 +188,6 @@ def test_database_failure_is_generic_and_rolls_back(setup, monkeypatch):
     assert all_transfers(test_engine) == []
 
 
-# --- Completing an upload ---
-
-
 def test_complete_marks_ready_and_stores_only_token_hash(setup, s3):
     client, test_engine = setup
     transfer, token = share(client, s3)
@@ -250,9 +242,6 @@ def test_complete_expired_transfer_is_refused(setup, s3):
     assert complete(client, transfer["id"]).status_code == 410
 
 
-# --- Sharing and downloading ---
-
-
 def test_share_info_does_not_count_as_download(setup, s3):
     client, test_engine = setup
     transfer, token = share(client, s3)
@@ -287,7 +276,6 @@ def test_unknown_token_is_refused(setup, token):
 
 def test_pending_transfer_cannot_be_downloaded(setup):
     client, _ = setup
-    # Even guessing the transfer ID gives no access before the upload is complete.
     transfer = create(client).json()
     assert client.get(f"/api/share/{transfer['id']}").status_code == 404
 

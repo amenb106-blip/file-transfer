@@ -100,7 +100,6 @@ def database_unavailable():
 
 
 def as_utc(moment):
-    # Postgres returns aware datetimes; SQLite (used in tests) drops the timezone.
     return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
 
 
@@ -191,7 +190,6 @@ def complete_transfer(
     try:
         size = storage.uploaded_size(s3, transfer.s3_key)
     except ClientError as error:
-        # Without list permission, S3 answers 403 instead of 404 for a missing file.
         if error.response.get("Error", {}).get("Code") in {"403", "404", "NoSuchKey"}:
             raise HTTPException(
                 status_code=409, detail="The file has not finished uploading."
@@ -206,7 +204,6 @@ def complete_transfer(
 
     share_token = secrets.token_urlsafe(32)
     try:
-        # Only one request can move a transfer out of pending, even if two arrive together.
         result = session.execute(
             update(Transfer)
             .where(Transfer.id == transfer_id, Transfer.status == "pending")
@@ -234,7 +231,6 @@ def shared_file(token: ShareToken, session: Annotated[Session, Depends(get_db)])
     )
 
 
-# POST rather than GET so chat-app link previews don't count as downloads.
 @app.post("/api/share/{token}/download", response_model=DownloadResponse)
 def download_shared_file(
     token: ShareToken,

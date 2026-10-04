@@ -30,12 +30,10 @@ def get_s3():
 
 
 def object_key(transfer_id):
-    # The filename is kept in the database, not the key, so odd names can't break S3 paths.
     return f"transfers/{transfer_id}"
 
 
 def upload_permission(s3, key, size_bytes):
-    # S3 rejects the upload unless the file is exactly the size the browser declared.
     return s3.generate_presigned_post(
         Bucket=bucket_name(),
         Key=key,
