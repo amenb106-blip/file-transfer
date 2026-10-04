@@ -1,5 +1,3 @@
-"""Vercel entrypoint: loads the FastAPI app that lives in backend/ and serves the built frontend."""
-
 import sys
 from pathlib import Path
 
