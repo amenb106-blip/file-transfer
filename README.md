@@ -147,13 +147,3 @@ For deployment:
 1. Add the six environment variables to Vercel.
 2. Create the database table by running `backend/db.py` against the production database.
 3. Add the deployed site's origin to the S3 bucket's `AllowedOrigins`.
-
-## Current Limitations
-
-- Expired share links are rejected, but expired database records are not automatically deleted.
-- S3 objects need a lifecycle rule or separate cleanup process.
-- Download URLs are valid for 60 seconds, so one created just before a transfer expires can remain usable briefly afterward.
-- Uploads use one shared passcode instead of user accounts.
-- There is currently no rate limiting.
-- Database schema migrations are not implemented.
-- Frontend checks cover type checking, builds, and linting, but there are no automated frontend tests yet.
