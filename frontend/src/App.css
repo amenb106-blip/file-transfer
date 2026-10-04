@@ -7,8 +7,6 @@
   gap: 32px;
 }
 
-/* Header */
-
 .site-header {
   width: 100%;
   max-width: 1120px;
@@ -48,8 +46,6 @@
 .theme-toggle:hover {
   background: var(--surface-muted);
 }
-
-/* Layout */
 
 .content {
   width: 100%;
@@ -122,8 +118,6 @@ p {
   white-space: nowrap;
 }
 
-/* Form fields */
-
 .field {
   display: flex;
   flex-direction: column;
@@ -156,8 +150,6 @@ p {
   background: var(--bg);
   color: var(--muted);
 }
-
-/* File picker: the real input is hidden, its label is the visible control. */
 
 .file-box {
   display: flex;
@@ -251,8 +243,6 @@ p {
   justify-content: center;
 }
 
-/* Buttons */
-
 .button {
   min-height: 50px;
   padding: 0 18px;
@@ -308,8 +298,6 @@ p {
   flex: 1 1 160px;
 }
 
-/* Upload progress */
-
 .progress {
   display: flex;
   flex-direction: column;
@@ -352,8 +340,6 @@ progress::-moz-progress-bar {
   border-radius: 4px;
 }
 
-/* Ready to share */
-
 .content:has(.result) {
   max-width: 760px;
 }
@@ -371,7 +357,6 @@ progress::-moz-progress-bar {
   padding: 12px;
   border: 1px solid var(--border);
   border-radius: 12px;
-  /* Stays white in dark mode: phone cameras scan dark-on-light codes most reliably. */
   background: #ffffff;
   line-height: 0;
 }
@@ -409,8 +394,6 @@ progress::-moz-progress-bar {
   font-size: 13px;
   color: var(--muted);
 }
-
-/* Download page */
 
 .download,
 .notice {

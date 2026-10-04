@@ -37,7 +37,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (!response.ok) {
     const body = await response.json().catch(() => null)
-    // FastAPI sends a readable string for our own errors and a list for validation errors.
     const message = typeof body?.detail === 'string'
       ? body.detail
       : response.status === 422
@@ -73,7 +72,6 @@ export function getDownloadUrl(token: string) {
   })
 }
 
-// Sends the file straight to S3. Uses XMLHttpRequest because fetch can't report upload progress.
 export function uploadToStorage(
   upload: CreatedTransfer['upload'],
   file: File,
@@ -82,7 +80,7 @@ export function uploadToStorage(
   return new Promise<void>((resolve, reject) => {
     const form = new FormData()
     for (const [name, value] of Object.entries(upload.fields)) form.append(name, value)
-    form.append('file', file) // S3 requires the file to be the last field.
+    form.append('file', file)
 
     const xhr = new XMLHttpRequest()
     xhr.open('POST', upload.url)

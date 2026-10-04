@@ -1,4 +1,3 @@
-/* Colour tokens. Light is the default; index.html sets data-theme before the page renders. */
 :root {
   color-scheme: light;
   --bg: #f4f5f2;

@@ -54,7 +54,6 @@ function UploadPage() {
       await uploadToStorage(transfer.upload, file, setProgress)
       const completed = await completeTransfer(transfer.id, passcode)
       const link = `${window.location.origin}/d/${completed.share_token}`
-      // The link still works if the QR code can't be drawn, so don't fail the transfer over it.
       const qrCode = await QRCode.toDataURL(link, { width: 416, margin: 1 }).catch(() => null)
       setShared({ link, qrCode, expiresAt: completed.expires_at })
       setPasscode('')

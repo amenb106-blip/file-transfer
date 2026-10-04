@@ -60,7 +60,6 @@ function DownloadPage({ token }: { token: string }) {
       window.location.assign(url)
     } catch (error) {
       const problem = describeProblem(error)
-      // An expired or invalid link replaces the page; anything else stays next to the button.
       if (problem.kind === 'other') setDownloadError(problem.detail)
       else setNotice(problem)
     } finally {
