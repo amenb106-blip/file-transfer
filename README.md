@@ -1,22 +1,15 @@
 # File Transfer
 
-A full-stack file-sharing app for quickly moving files between devices with temporary share links and QR codes.
+A full-stack web application for sharing files between devices using temporary links and QR codes. Files upload directly to AWS S3, with FastAPI managing transfer validation and access.
 
-**[Live App](https://file-transfer-silk.vercel.app)** · [![Tests](https://github.com/amenb106-blip/file-transfer/actions/workflows/tests.yml/badge.svg)](https://github.com/amenb106-blip/file-transfer/actions/workflows/tests.yml)
+[Live App](https://file-transfer-silk.vercel.app) | [![Tests](https://github.com/amenb106-blip/file-transfer/actions/workflows/tests.yml/badge.svg)](https://github.com/amenb106-blip/file-transfer/actions/workflows/tests.yml)
 
 ## Features
 
-- Upload files directly from the browser to **AWS S3** using presigned forms
-- Share files with a temporary link or **QR code**
-- Enforce a **25 MiB upload limit**
-- Expire share links **10 minutes after transfer creation**
-- Store only **SHA-256 hashes of share tokens** in PostgreSQL
-- Track upload progress in the React interface
-- Support light and dark mode
-- Protect uploads with a private passcode
-- Run backend tests automatically with **pytest** and **GitHub Actions**
-
-Anyone with a valid share link can download the file until the transfer expires.
+- Upload files up to **25 MiB** directly to AWS S3 with progress tracking.
+- Share files through a link or QR code that expires **10 minutes after transfer creation**.
+- Passcode-protected uploads; recipients can download using a valid share link.
+- Server-side upload verification and short-lived download URLs.
 
 ## Tech Stack
 
@@ -26,69 +19,31 @@ Anyone with a valid share link can download the file until the transfer expires.
 | Backend | FastAPI, Python |
 | Database | PostgreSQL, SQLAlchemy |
 | File storage | AWS S3, boto3 |
-| Testing | pytest, mocked S3 |
+| Testing | pytest, Moto (mocked S3) |
 | CI | GitHub Actions |
 | Hosting | Vercel |
 
 ## How It Works
 
-1. The user selects a file and enters the upload passcode.
-2. FastAPI validates the request and creates a transfer record in PostgreSQL.
-3. The frontend uploads the file directly to S3 using a presigned form.
-4. After the upload is confirmed, the app generates a temporary share link and QR code.
-5. The recipient opens the link, and the backend validates the token and expiration before issuing a short-lived S3 download URL.
+1. Select a file and enter the upload passcode.
+2. The browser uploads the file directly to S3 using a presigned form provided by the API.
+3. The backend verifies the upload, then the app displays a share link and QR code.
+4. The recipient opens the link and downloads the file after the API checks the share token and expiration.
 
-```text
-Browser  <------ API requests ------>  FastAPI
-   |                                    |
-   | file upload/download               | transfer metadata
-   v                                    v
-AWS S3                              PostgreSQL
-```
+## Local Setup
 
-## Run Locally
+Requires Python 3.14, Node.js 24, PostgreSQL, and an AWS S3 bucket.
 
-### Requirements
+### Configuration
 
-- Python 3.14
-- Node.js 24
-- PostgreSQL database
-- AWS S3 bucket
+Copy [backend/.env.example](backend/.env.example) to `backend/.env` and set:
 
-### 1. Configure environment variables
+- `DATABASE_URL` and `UPLOAD_PASSCODE`
+- `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, and `S3_BUCKET`
 
-Copy `backend/.env.example` to `backend/.env` and fill in:
+The AWS credentials need `s3:PutObject` and `s3:GetObject` access to `transfers/*` in the bucket. Configure bucket CORS to allow `POST` from `http://localhost:5173` with all headers.
 
-| Variable | Description |
-| --- | --- |
-| `DATABASE_URL` | PostgreSQL connection URL |
-| `UPLOAD_PASSCODE` | Private passcode required for uploads |
-| `AWS_ACCESS_KEY_ID` | AWS access key |
-| `AWS_SECRET_ACCESS_KEY` | AWS secret key |
-| `AWS_REGION` | AWS region containing the bucket |
-| `S3_BUCKET` | S3 bucket name |
-
-Keep `.env` private. It is ignored by Git.
-
-The app's AWS credentials need `s3:PutObject` and `s3:GetObject` access to:
-
-```text
-arn:aws:s3:::<your-bucket>/transfers/*
-```
-
-For local browser uploads, configure the S3 bucket CORS policy:
-
-```json
-[
-  {
-    "AllowedOrigins": ["http://localhost:5173"],
-    "AllowedMethods": ["POST"],
-    "AllowedHeaders": ["*"]
-  }
-]
-```
-
-### 2. Start the backend
+### Backend
 
 From the repository root:
 
@@ -100,9 +55,9 @@ py -3.14 -m venv .venv
 .\.venv\Scripts\python.exe -m uvicorn main:app --reload
 ```
 
-### 3. Start the frontend
+### Frontend
 
-In a second terminal:
+In a second terminal, from the repository root:
 
 ```powershell
 cd frontend
@@ -110,20 +65,18 @@ npm ci
 npm run dev
 ```
 
-Open `http://localhost:5173`.
+Open `http://localhost:5173`. The development server forwards API requests to FastAPI on port `8000`.
 
-The Vite development server forwards `/api` requests to FastAPI on port `8000`.
+## Testing
 
-## Tests and Checks
-
-Backend tests:
+Backend tests use an in-memory database and mocked S3 to cover validation, authorization, uploads, and link expiration.
 
 ```powershell
 cd backend
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-Frontend checks:
+Frontend checks, from a separate terminal at the repository root:
 
 ```powershell
 cd frontend
@@ -131,19 +84,4 @@ npm run build
 npm run lint
 ```
 
-GitHub Actions runs the automated checks on pushes and pull requests.
-
-## Deployment
-
-The project is deployed as a single Vercel application.
-
-- `vercel.json` builds the React frontend.
-- `app.py` loads the FastAPI backend and serves the built frontend.
-- API routes are handled by FastAPI.
-- Other routes fall back to `index.html` so React can handle shared-file URLs.
-
-For deployment:
-
-1. Add the six environment variables to Vercel.
-2. Create the database table by running `backend/db.py` against the production database.
-3. Add the deployed site's origin to the S3 bucket's `AllowedOrigins`.
+GitHub Actions runs these checks on every push and pull request.
