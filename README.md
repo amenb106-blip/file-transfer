@@ -1,165 +1,159 @@
 # File Transfer
 
-[![Tests](https://github.com/amenb106-blip/file-transfer/actions/workflows/tests.yml/badge.svg)](https://github.com/amenb106-blip/file-transfer/actions/workflows/tests.yml)
+A full-stack file-sharing app for quickly moving files between devices with temporary share links and QR codes.
 
-A web app for sending a file from one device to another with a temporary link or QR code.
+**[Live App](https://file-transfer-silk.vercel.app)** · [![Tests](https://github.com/amenb106-blip/file-transfer/actions/workflows/tests.yml/badge.svg)](https://github.com/amenb106-blip/file-transfer/actions/workflows/tests.yml)
 
-**Status: in progress.** The upload → share link → download flow works in local development. Deployment to Vercel is configured but not live yet, so share links only work on the computer running the app.
+## Features
 
-## How it works
+- Upload files directly from the browser to **AWS S3** using presigned forms
+- Share files with a temporary link or **QR code**
+- Enforce a **25 MiB upload limit**
+- Expire share links **10 minutes after transfer creation**
+- Store only **SHA-256 hashes of share tokens** in PostgreSQL
+- Track upload progress in the React interface
+- Support light and dark mode
+- Protect uploads with a private passcode
+- Run backend tests automatically with **pytest** and **GitHub Actions**
 
-1. The browser sends the file's name and size, plus an upload passcode, to the FastAPI backend.
-2. The backend saves a `pending` transfer in PostgreSQL and returns a presigned S3 upload form that only accepts a file of exactly that size.
-3. The browser uploads the file directly to S3. The file does not pass through the backend.
-4. The browser asks the backend to complete the transfer. The backend checks that the file exists in S3 with the expected size, marks the transfer `ready`, and returns a random share token.
-5. The page shows the share link (`/d/<token>`) and a QR code. The link opens a download page. When the user clicks **Download**, the backend checks the token and expiry, counts the download, and returns an S3 download URL that is valid for 60 seconds and keeps the original filename.
+Anyone with a valid share link can download the file until the transfer expires.
 
-Transfers expire 10 minutes after they are created. Only a SHA-256 hash of each share token is stored in the database.
+## Tech Stack
 
-## What works
-
-Checked with automated tests and with manual runs against a real S3 bucket and Neon PostgreSQL database:
-
-- Passcode-protected transfer creation with file name and size validation (25 MiB limit).
-- Direct browser-to-S3 uploads with presigned POST forms; S3 rejects files that don't match the declared size.
-- Upload confirmation that refuses missing, wrong-size, already completed, and expired uploads.
-- Share links that show the file's name, size, and expiry, and refuse invalid or expired tokens.
-- Downloads through short-lived S3 URLs, with a download counter. Downloading is a POST, so link previews in chat apps don't count as downloads.
-- GitHub Actions runs the backend tests and the frontend build and lint on every push.
-
-The frontend has:
-
-- An upload page with a file picker, upload progress bar, and a result screen with the QR code, a **Copy link** button, and **Send another file**.
-- A download page with clear messages for expired and invalid links.
-- Light and dark mode. It follows the device setting by default and remembers the choice from the header button.
-
-## Current limitations
-
-- **Not deployed yet.** Until it is, other devices can't open share links, and QR codes point to `localhost`.
-- **No database cleanup.** Expired transfers are refused, but their records stay in the database. Old files are removed only if an S3 lifecycle rule is set up on the bucket.
-- **Single shared passcode.** No user accounts and no rate limiting.
-- **No migrations.** `db.py` creates the table if it's missing but doesn't update an existing table.
-- **Backend tests only.** The frontend has type checking and linting but no automated tests.
-
-## Planned
-
-- Go live on Vercel, then test laptop → phone over mobile data.
-- A demo GIF in this README.
-- Rate limiting, and a limited guest mode so visitors can try it without the passcode.
-
-## Tech stack
-
-| Area | Tools |
+| Area | Technology |
 | --- | --- |
-| Frontend | React, TypeScript, Vite, `qrcode` |
-| Backend | Python, FastAPI, Pydantic, SQLAlchemy |
-| Storage | PostgreSQL (Neon), AWS S3 via boto3 |
-| Tests and CI | pytest, moto (mocked S3), in-memory SQLite, GitHub Actions |
-| Hosting | Vercel (configured, not live yet) |
+| Frontend | React, TypeScript, Vite |
+| Backend | FastAPI, Python |
+| Database | PostgreSQL, SQLAlchemy |
+| File storage | AWS S3, boto3 |
+| Testing | pytest, mocked S3 |
+| CI | GitHub Actions |
+| Hosting | Vercel |
 
-## Run locally (Windows PowerShell)
+## How It Works
+
+1. The user selects a file and enters the upload passcode.
+2. FastAPI validates the request and creates a transfer record in PostgreSQL.
+3. The frontend uploads the file directly to S3 using a presigned form.
+4. After the upload is confirmed, the app generates a temporary share link and QR code.
+5. The recipient opens the link, and the backend validates the token and expiration before issuing a short-lived S3 download URL.
+
+```text
+Browser  <------ API requests ------>  FastAPI
+   |                                    |
+   | file upload/download               | transfer metadata
+   v                                    v
+AWS S3                              PostgreSQL
+```
+
+## Run Locally
 
 ### Requirements
 
-- Python 3 and Node.js.
-- A PostgreSQL database (for example, a free Neon database).
-- An S3 bucket and an IAM user for the app. The app only needs `s3:PutObject` and `s3:GetObject` on `arn:aws:s3:::<your-bucket>/transfers/*`.
-- A CORS rule on the bucket so the browser can upload to it. Add your deployed site's address to `AllowedOrigins` too once it's live:
+- Python 3.14
+- Node.js 24
+- PostgreSQL database
+- AWS S3 bucket
 
-  ```json
-  [
-    {
-      "AllowedOrigins": ["http://localhost:5173"],
-      "AllowedMethods": ["POST"],
-      "AllowedHeaders": ["*"],
-      "MaxAgeSeconds": 3000
-    }
-  ]
-  ```
+### 1. Configure environment variables
 
-### Backend
+Copy `backend/.env.example` to `backend/.env` and fill in:
 
-From `backend/`:
+| Variable | Description |
+| --- | --- |
+| `DATABASE_URL` | PostgreSQL connection URL |
+| `UPLOAD_PASSCODE` | Private passcode required for uploads |
+| `AWS_ACCESS_KEY_ID` | AWS access key |
+| `AWS_SECRET_ACCESS_KEY` | AWS secret key |
+| `AWS_REGION` | AWS region containing the bucket |
+| `S3_BUCKET` | S3 bucket name |
+
+Keep `.env` private. It is ignored by Git.
+
+The app's AWS credentials need `s3:PutObject` and `s3:GetObject` access to:
+
+```text
+arn:aws:s3:::<your-bucket>/transfers/*
+```
+
+For local browser uploads, configure the S3 bucket CORS policy:
+
+```json
+[
+  {
+    "AllowedOrigins": ["http://localhost:5173"],
+    "AllowedMethods": ["POST"],
+    "AllowedHeaders": ["*"]
+  }
+]
+```
+
+### 2. Start the backend
+
+From the repository root:
 
 ```powershell
-py -m venv .venv
+cd backend
+py -3.14 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-```
-
-`backend/requirements.txt` installs the app's packages from the root `requirements.txt`, plus the local server and test tools.
-
-Copy `.env.example` to `.env` and fill in every value: `DATABASE_URL`, `UPLOAD_PASSCODE`, and the AWS settings. Never commit `.env`. To generate a passcode:
-
-```powershell
-.\.venv\Scripts\python.exe -c "import secrets; print(secrets.token_urlsafe(24))"
-```
-
-Create the table, then start the API:
-
-```powershell
 .\.venv\Scripts\python.exe db.py
 .\.venv\Scripts\python.exe -m uvicorn main:app --reload
 ```
 
-### Frontend
+### 3. Start the frontend
 
-In a second terminal, from `frontend/`:
+In a second terminal:
 
 ```powershell
+cd frontend
 npm ci
 npm run dev
 ```
 
-Open `http://localhost:5173`, choose a file, enter the passcode from `backend/.env`, and choose **Send file**. Open the link it shows in another browser to download the file.
+Open `http://localhost:5173`.
 
-## Tests and checks
+The Vite development server forwards `/api` requests to FastAPI on port `8000`.
 
-From `backend/`. The tests use mocked S3 and an in-memory database, so they need no AWS account or database:
+## Tests and Checks
+
+Backend tests:
 
 ```powershell
+cd backend
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-From `frontend/`:
+Frontend checks:
 
 ```powershell
+cd frontend
 npm run build
 npm run lint
 ```
 
-## Deploying to Vercel
+GitHub Actions runs the automated checks on pushes and pull requests.
 
-The repository deploys as one Vercel project:
+## Deployment
 
-- `app.py` is the entrypoint Vercel looks for. It loads the FastAPI app from `backend/`, which becomes a single Vercel Function, and serves the built frontend with `app.frontend()`. Vercel moves those files to its CDN, and page addresses such as `/d/<token>` get `index.html`.
-- `requirements.txt` lists only the packages the deployed app needs.
-- `vercel.json` builds the frontend and keeps `node_modules`, frontend source, and tests out of the function.
+The project is deployed as a single Vercel application.
 
-In the Vercel project settings, add the same environment variables as `backend/.env`: `DATABASE_URL`, `UPLOAD_PASSCODE`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, and `S3_BUCKET`.
+- `vercel.json` builds the React frontend.
+- `app.py` loads the FastAPI backend and serves the built frontend.
+- API routes are handled by FastAPI.
+- Other routes fall back to `index.html` so React can handle shared-file URLs.
 
-## API
+For deployment:
 
-| Route | Purpose |
-| --- | --- |
-| `GET /api/health` | Health check |
-| `POST /api/transfers` | Create a pending transfer and return an S3 upload form (passcode required) |
-| `POST /api/transfers/{id}/complete` | Check the upload in S3 and return a share token (passcode required) |
-| `GET /api/share/{token}` | File name, size, and expiry for the download page |
-| `POST /api/share/{token}/download` | Short-lived S3 download URL |
+1. Add the six environment variables to Vercel.
+2. Create the database table by running `backend/db.py` against the production database.
+3. Add the deployed site's origin to the S3 bucket's `AllowedOrigins`.
 
-## Project files
+## Current Limitations
 
-| File | Purpose |
-| --- | --- |
-| `backend/main.py` | API routes, validation, passcode check, expiry checks |
-| `backend/storage.py` | S3 upload forms, upload checks, and download URLs |
-| `backend/db.py` | Database connection and transfer table |
-| `backend/tests/test_api.py` | API tests |
-| `frontend/src/api.ts` | Calls to the backend and the S3 upload |
-| `frontend/src/pages/UploadPage.tsx` | File picker, upload progress, share link, and QR code |
-| `frontend/src/pages/DownloadPage.tsx` | Download page for share links |
-| `frontend/src/components/Header.tsx` | Logo and the light/dark mode button |
-| `frontend/src/index.css`, `frontend/src/App.css` | Light and dark colours, and page styles |
-| `frontend/vite.config.ts` | Forwards `/api` requests to the backend during development |
-| `app.py`, `vercel.json`, `requirements.txt` | Vercel deployment |
-| `.github/workflows/tests.yml` | Runs the checks on every push |
+- Expired share links are rejected, but expired database records are not automatically deleted.
+- S3 objects need a lifecycle rule or separate cleanup process.
+- Download URLs are valid for 60 seconds, so one created just before a transfer expires can remain usable briefly afterward.
+- Uploads use one shared passcode instead of user accounts.
+- There is currently no rate limiting.
+- Database schema migrations are not implemented.
+- Frontend checks cover type checking, builds, and linting, but there are no automated frontend tests yet.
