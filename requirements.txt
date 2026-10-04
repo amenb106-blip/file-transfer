@@ -1,0 +1,6 @@
+# Packages the deployed app needs. Vercel installs these; backend/requirements.txt adds local and test tools.
+fastapi==0.142.2
+sqlalchemy==2.1.1
+psycopg[binary]==3.3.6
+python-dotenv==1.2.3
+boto3==1.43.107

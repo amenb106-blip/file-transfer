@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "cd frontend && npm ci && npm run build && rm -rf ../public && cp -r dist ../public",
+  "rewrites": [{ "source": "/d/:token", "destination": "/index.html" }],
+  "functions": {
+    "app.py": {
+      "excludeFiles": "{frontend/**,public/**,backend/tests/**}"
+    }
+  }
+}
