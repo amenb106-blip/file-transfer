@@ -8,11 +8,16 @@ import {
   formatSize,
   uploadToStorage,
 } from '../api'
+import { CheckIcon, ClockIcon, CopyIcon, FileIcon, UploadIcon } from '../components/icons'
 
 type Shared = {
   link: string
   qrCode: string | null
   expiresAt: string
+}
+
+function formatTime(iso: string) {
+  return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 }
 
 function UploadPage() {
@@ -50,7 +55,7 @@ function UploadPage() {
       const completed = await completeTransfer(transfer.id, passcode)
       const link = `${window.location.origin}/d/${completed.share_token}`
       // The link still works if the QR code can't be drawn, so don't fail the transfer over it.
-      const qrCode = await QRCode.toDataURL(link, { width: 240, margin: 1 }).catch(() => null)
+      const qrCode = await QRCode.toDataURL(link, { width: 416, margin: 1 }).catch(() => null)
       setShared({ link, qrCode, expiresAt: completed.expires_at })
       setPasscode('')
     } catch (error) {
@@ -60,84 +65,139 @@ function UploadPage() {
     }
   }
 
-  return (
-    <main>
-      <h1>File Transfer</h1>
-
-      {shared ? (
-        <section aria-live="polite">
-          <h2>Ready to share</h2>
-          <p>Scan the QR code or open the link on your other device:</p>
+  if (shared) {
+    return (
+      <main className="content">
+        <section className="card result" aria-live="polite">
           {shared.qrCode && (
-            <img src={shared.qrCode} width={240} height={240} alt="QR code for the share link" />
+            <div className="qr">
+              <img src={shared.qrCode} width={208} height={208} alt="QR code for the share link" />
+            </div>
           )}
-          <p>
-            <a href={shared.link}>{shared.link}</a>
-          </p>
-          <p>Expires: {new Date(shared.expiresAt).toLocaleString()}</p>
-          <button type="button" onClick={() => copyLink(shared.link)}>
-            {copied ? 'Copied' : 'Copy link'}
-          </button>
-          <button type="button" onClick={sendAnother}>
-            Send another file
-          </button>
-        </section>
-      ) : (
-        <>
-          <p>Choose a file to send to another device.</p>
+          <div className="result-details">
+            <div className="stack-sm">
+              <span className="badge">
+                <CheckIcon size={16} />
+                Uploaded
+              </span>
+              <h1>Ready to share</h1>
+              <p className="muted">Scan the QR code or open the link on your other device.</p>
+            </div>
 
-          <form onSubmit={sendFile}>
-            <label htmlFor="file">Choose a file</label>
-            <input
-              id="file"
-              type="file"
-              disabled={busy}
-              onChange={(event) => {
-                const selectedFile = event.target.files?.[0] ?? null
+            <div className="field">
+              <label htmlFor="share-link" className="field-label">Share link</label>
+              <input
+                id="share-link"
+                className="input mono"
+                readOnly
+                value={shared.link}
+                onFocus={(event) => event.target.select()}
+              />
+            </div>
 
-                setError('')
-                setFile(null)
+            <div className="actions">
+              <button type="button" className="button primary" onClick={() => copyLink(shared.link)}>
+                <CopyIcon />
+                {copied ? 'Copied' : 'Copy link'}
+              </button>
+              <button type="button" className="button secondary" onClick={sendAnother}>
+                Send another file
+              </button>
+            </div>
 
-                if (selectedFile && (selectedFile.size === 0 || selectedFile.size > MAX_FILE_SIZE)) {
-                  setError('Choose a nonempty file no larger than 25 MB.')
-                  event.target.value = ''
-                  return
-                }
-
-                setFile(selectedFile)
-              }}
-            />
-
-            {file && (
-              <p>
-                {file.name} — {formatSize(file.size)}
-              </p>
-            )}
-
-            <label htmlFor="passcode">Upload passcode</label>
-            <input
-              id="passcode"
-              type="password"
-              autoComplete="off"
-              value={passcode}
-              disabled={busy}
-              onChange={(event) => setPasscode(event.target.value)}
-              required
-            />
-            <button type="submit" disabled={!file || !passcode || busy}>
-              {busy ? 'Sending...' : 'Send file'}
-            </button>
-          </form>
-
-          {progress !== null && (
-            <p>
-              <progress value={progress} max={1} /> {Math.round(progress * 100)}%
+            <p className="expires">
+              <ClockIcon size={16} />
+              Expires at {formatTime(shared.expiresAt)}
             </p>
-          )}
-        </>
-      )}
+            {error && <p role="alert" className="error">{error}</p>}
+          </div>
+        </section>
+      </main>
+    )
+  }
 
-      {error && <p role="alert">{error}</p>}
+  return (
+    <main className="content">
+      <form className="card stack" onSubmit={sendFile}>
+        <div className="stack-sm">
+          <h1>Send a file</h1>
+          <p className="muted">
+            Open it on any device with a link or QR code. Links expire after 10 minutes.
+          </p>
+        </div>
+
+        <div className="field">
+          <span className="field-label">File</span>
+          <input
+            id="file"
+            type="file"
+            className="visually-hidden file-input"
+            disabled={busy}
+            onChange={(event) => {
+              const selectedFile = event.target.files?.[0] ?? null
+
+              setError('')
+              setFile(null)
+
+              if (selectedFile && (selectedFile.size === 0 || selectedFile.size > MAX_FILE_SIZE)) {
+                setError('Choose a nonempty file no larger than 25 MB.')
+                event.target.value = ''
+                return
+              }
+
+              setFile(selectedFile)
+            }}
+          />
+          {file ? (
+            <label htmlFor="file" className="file-box chosen">
+              <span className="file-icon"><FileIcon size={22} /></span>
+              <span className="file-text">
+                <span className="file-name">{file.name}</span>
+                <span className="muted small">{formatSize(file.size)}</span>
+              </span>
+              {!busy && <span className="file-change">Change</span>}
+            </label>
+          ) : (
+            <label htmlFor="file" className="file-box empty">
+              <span className="upload-circle"><UploadIcon size={22} /></span>
+              <span className="file-choose">Choose a file</span>
+              <span className="muted small">Up to 25 MB</span>
+            </label>
+          )}
+        </div>
+
+        {progress !== null && (
+          <div className="progress">
+            <div className="progress-label">
+              <span>Uploading…</span>
+              <span className="mono">{Math.round(progress * 100)}%</span>
+            </div>
+            <progress value={progress} max={1} aria-label="Upload progress" />
+          </div>
+        )}
+
+        <div className="field">
+          <label htmlFor="passcode" className="field-label">Upload passcode</label>
+          <input
+            id="passcode"
+            type="password"
+            className="input"
+            autoComplete="current-password"
+            spellCheck={false}
+            value={passcode}
+            disabled={busy}
+            onChange={(event) => setPasscode(event.target.value)}
+            required
+          />
+        </div>
+
+        <button type="submit" className="button primary wide" disabled={!file || !passcode || busy}>
+          <UploadIcon />
+          {busy ? 'Sending…' : 'Send file'}
+        </button>
+
+        {error && <p role="alert" className="error">{error}</p>}
+      </form>
     </main>
   )
 }

@@ -1,12 +1,73 @@
-body {
-  margin: 0;
-  font-family: system-ui, sans-serif;
-  line-height: 1.5;
-  color: #1f2937;
-  background-color: #ffffff;
+/* Colour tokens. Light is the default; index.html sets data-theme before the page renders. */
+:root {
+  color-scheme: light;
+  --bg: #f4f5f2;
+  --surface: #ffffff;
+  --surface-muted: #fafaf8;
+  --border: #e3e4e0;
+  --border-strong: #c9cbc5;
+  --text: #17181a;
+  --muted: #5b5f66;
+  --accent: #2b50e8;
+  --accent-hover: #1c3bb8;
+  --on-accent: #ffffff;
+  --icon-bg: #eceef3;
+  --success-bg: #e7f4ec;
+  --success-text: #17633a;
+  --warning-bg: #fdf0e7;
+  --warning-text: #a3410f;
+  --danger: #b42318;
+  --track: #e6e7e3;
+  --disabled-bg: #dcddd8;
+  --disabled-text: #3a3d44;
+  --shadow: 0 1px 2px rgb(23 24 26 / 0.04);
 }
 
-input {
-  max-width: 100%;
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #141518;
+  --surface: #1c1e22;
+  --surface-muted: #22252a;
+  --border: #2e3137;
+  --border-strong: #4a4e57;
+  --text: #ecedee;
+  --muted: #a3a7ae;
+  --accent: #7b93ff;
+  --accent-hover: #9aaeff;
+  --on-accent: #0b1230;
+  --icon-bg: #2a2e36;
+  --success-bg: #163a25;
+  --success-text: #8fddae;
+  --warning-bg: #3d2414;
+  --warning-text: #f6b183;
+  --danger: #ff8a80;
+  --track: #2e3137;
+  --disabled-bg: #2e3137;
+  --disabled-text: #a3a7ae;
+  --shadow: none;
+}
+
+body {
+  margin: 0;
+  font-family: 'IBM Plex Sans', system-ui, sans-serif;
+  line-height: 1.5;
+  color: var(--text);
+  background-color: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+input,
+button {
   font: inherit;
+}
+
+:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+  }
 }
