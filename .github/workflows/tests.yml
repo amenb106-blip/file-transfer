@@ -20,7 +20,6 @@ jobs:
             requirements.txt
             backend/requirements.txt
       - run: pip install -r requirements.txt
-      # Tests use mocked S3 and an in-memory database, so no secrets are needed.
       - run: python -m pytest -q
 
   frontend:
