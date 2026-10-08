@@ -7,6 +7,7 @@ from uuid import UUID
 
 import boto3
 import pytest
+from botocore.exceptions import ClientError
 from fastapi.testclient import TestClient
 from moto import mock_aws
 from sqlalchemy import create_engine, select
@@ -66,8 +67,9 @@ def create(client, filename="notes.pdf", size=100, headers=HEADERS):
     return client.post("/api/transfers", headers=headers, json={"filename": filename, "size_bytes": size})
 
 
-def complete(client, transfer_id, headers=HEADERS):
-    return client.post(f"/api/transfers/{transfer_id}/complete", headers=headers)
+def complete(client, transfer_id, headers=HEADERS, token=None):
+    body = {"json": {"share_token": token}} if token is not None else {}
+    return client.post(f"/api/transfers/{transfer_id}/complete", headers=headers, **body)
 
 
 def upload(s3, transfer, body):
@@ -221,6 +223,80 @@ def test_complete_twice_is_refused(setup, s3):
     assert complete(client, transfer["id"]).status_code == 409
 
 
+def test_completion_retry_recovers_same_link_without_storage_access(setup, s3, monkeypatch):
+    client, test_engine = setup
+    transfer = create(client, size=5).json()
+    upload(s3, transfer, b"hello")
+    token = "ab" * 32
+    first = complete(client, transfer["id"], token=token)
+    assert first.status_code == 200
+    monkeypatch.setattr(s3, "head_object", lambda **kwargs: pytest.fail("Retry must not recheck S3"))
+    retry = complete(client, transfer["id"], token=token)
+    assert retry.status_code == 200
+    assert retry.json() == first.json()
+    assert all_transfers(test_engine)[0].share_token_hash == hash_token(token)
+    assert client.get(f"/api/share/{token}").status_code == 200
+    assert complete(client, transfer["id"], token="cd" * 32).status_code == 409
+    assert complete(client, transfer["id"], token=token, headers={}).status_code == 401
+    expire(test_engine, transfer["id"])
+    assert complete(client, transfer["id"], token=token).status_code == 410
+
+
+@pytest.mark.parametrize("other_token, expected", [("ab" * 32, 200), ("cd" * 32, 409)])
+def test_overlapping_completions_preserve_winning_link(setup, s3, monkeypatch, other_token, expected):
+    import storage
+
+    client, _ = setup
+    transfer = create(client, size=5).json()
+    upload(s3, transfer, b"hello")
+    original = storage.uploaded_size
+
+    def finish_other_request(s3_client, key):
+        monkeypatch.setattr(storage, "uploaded_size", original)
+        assert complete(client, transfer["id"], token=other_token).status_code == 200
+        return original(s3_client, key)
+
+    monkeypatch.setattr(storage, "uploaded_size", finish_other_request)
+    assert complete(client, transfer["id"], token="ab" * 32).status_code == expected
+    assert client.get(f"/api/share/{other_token}").status_code == 200
+
+
+@pytest.mark.parametrize("token", ["", "a" * 63, "a" * 65, "z" * 64])
+def test_completion_rejects_invalid_retry_tokens(setup, token):
+    client, _ = setup
+    transfer = create(client).json()
+    assert complete(client, transfer["id"], token=token).status_code == 422
+
+
+def test_failed_completion_commit_can_be_retried(setup, s3, monkeypatch):
+    client, _ = setup
+    transfer = create(client, size=5).json()
+    upload(s3, transfer, b"hello")
+    with monkeypatch.context() as patch:
+        def fail_commit(self):
+            raise SQLAlchemyError("private database details")
+        patch.setattr(Session, "commit", fail_commit)
+        assert complete(client, transfer["id"], token="ab" * 32).status_code == 503
+    assert complete(client, transfer["id"], token="ab" * 32).status_code == 200
+
+
+def test_completion_cannot_publish_a_transfer_that_expires_during_verification(setup, s3, monkeypatch):
+    import storage
+
+    client, test_engine = setup
+    transfer = create(client, size=5).json()
+    upload(s3, transfer, b"hello")
+    original = storage.uploaded_size
+
+    def expire_during_verification(s3_client, key):
+        expire(test_engine, transfer["id"])
+        return original(s3_client, key)
+
+    monkeypatch.setattr(storage, "uploaded_size", expire_during_verification)
+    assert complete(client, transfer["id"], token="ab" * 32).status_code == 410
+    assert all_transfers(test_engine)[0].status == "pending"
+
+
 def test_complete_requires_passcode(setup, s3):
     client, test_engine = setup
     transfer = create(client, size=5).json()
@@ -298,3 +374,116 @@ def test_expired_link_is_refused(setup, s3):
 )
 def test_content_disposition_keeps_original_filename(filename, expected):
     assert content_disposition(filename) == expected
+
+
+CRON_HEADERS = {"Authorization": "Bearer test-cleanup-secret"}
+
+
+def make_cleanup_eligible(test_engine, transfer_id):
+    with Session(test_engine) as session:
+        session.get(Transfer, transfer_id).expires_at = datetime.now(timezone.utc) - timedelta(hours=2)
+        session.commit()
+
+
+def test_cleanup_deletes_old_ready_and_abandoned_transfers(setup, s3, monkeypatch):
+    client, test_engine = setup
+    monkeypatch.setenv("CRON_SECRET", "test-cleanup-secret")
+    ready, _ = share(client, s3)
+    abandoned = create(client, size=5).json()
+    upload(s3, abandoned, b"hello")
+    missing = create(client).json()
+    active, token = share(client, s3)
+    recent, _ = share(client, s3)
+    expire(test_engine, recent["id"])
+    for transfer in [ready, abandoned, missing]:
+        make_cleanup_eligible(test_engine, transfer["id"])
+    result = client.get("/api/cron/cleanup", headers=CRON_HEADERS)
+    assert result.status_code == 200
+    assert result.headers["cache-control"] == "no-store"
+    assert result.json() == {"deleted": 3, "failed": 0, "remaining": False}
+    assert {record.id for record in all_transfers(test_engine)} == {active["id"], recent["id"]}
+    keys = {obj["Key"] for obj in s3.list_objects_v2(Bucket=TEST_BUCKET)["Contents"]}
+    assert keys == {f"transfers/{active['id']}", f"transfers/{recent['id']}"}
+    assert client.get(f"/api/share/{token}").status_code == 200
+    assert client.get("/api/cron/cleanup", headers=CRON_HEADERS).json()["deleted"] == 0
+
+
+@pytest.mark.parametrize("headers", [{}, HEADERS, {"Authorization": "Bearer wrong"}])
+def test_cleanup_requires_its_own_secret(setup, s3, monkeypatch, headers):
+    client, test_engine = setup
+    monkeypatch.setenv("CRON_SECRET", "test-cleanup-secret")
+    transfer, _ = share(client, s3)
+    make_cleanup_eligible(test_engine, transfer["id"])
+    assert client.get("/api/cron/cleanup", headers=headers).status_code == 401
+    assert len(all_transfers(test_engine)) == 1
+    assert s3.head_object(Bucket=TEST_BUCKET, Key=f"transfers/{transfer['id']}")["ContentLength"] == 5
+
+
+def test_unconfigured_cleanup_fails_closed(setup, monkeypatch):
+    client, _ = setup
+    monkeypatch.delenv("CRON_SECRET", raising=False)
+    assert client.get("/api/cron/cleanup", headers=CRON_HEADERS).status_code == 503
+
+
+def test_cleanup_keeps_failed_deletions_for_retry(setup, s3, monkeypatch):
+    client, test_engine = setup
+    monkeypatch.setenv("CRON_SECRET", "test-cleanup-secret")
+    failed, _ = share(client, s3)
+    removed, _ = share(client, s3)
+    for transfer in [failed, removed]:
+        make_cleanup_eligible(test_engine, transfer["id"])
+    original = s3.delete_objects
+    failed_key = f"transfers/{failed['id']}"
+
+    def partial_delete(**kwargs):
+        kwargs["Delete"]["Objects"] = [obj for obj in kwargs["Delete"]["Objects"] if obj["Key"] != failed_key]
+        result = original(**kwargs)
+        result["Errors"] = [{"Key": failed_key, "Code": "AccessDenied"}]
+        return result
+
+    with monkeypatch.context() as patch:
+        patch.setattr(s3, "delete_objects", partial_delete)
+        response = client.get("/api/cron/cleanup", headers=CRON_HEADERS)
+    assert response.status_code == 503
+    assert response.json() == {"deleted": 1, "failed": 1, "remaining": True}
+    assert [record.id for record in all_transfers(test_engine)] == [failed["id"]]
+    assert client.get("/api/cron/cleanup", headers=CRON_HEADERS).json()["deleted"] == 1
+
+
+@pytest.mark.parametrize("failure", ["storage", "database"])
+def test_cleanup_failure_preserves_records_for_retry(setup, s3, monkeypatch, failure):
+    client, test_engine = setup
+    monkeypatch.setenv("CRON_SECRET", "test-cleanup-secret")
+    transfer, _ = share(client, s3)
+    make_cleanup_eligible(test_engine, transfer["id"])
+    with monkeypatch.context() as patch:
+        if failure == "storage":
+            def fail_delete(**kwargs):
+                raise ClientError({"Error": {"Code": "AccessDenied"}}, "DeleteObjects")
+            patch.setattr(s3, "delete_objects", fail_delete)
+        else:
+            def fail_commit(self):
+                raise SQLAlchemyError("private database details")
+            patch.setattr(Session, "commit", fail_commit)
+        response = client.get("/api/cron/cleanup", headers=CRON_HEADERS)
+    assert response.status_code == 503
+    assert "private" not in response.text
+    assert len(all_transfers(test_engine)) == 1
+    assert client.get("/api/cron/cleanup", headers=CRON_HEADERS).json()["deleted"] == 1
+
+
+def test_cleanup_bounds_each_run_and_reports_backlog(setup, s3, monkeypatch):
+    import cleanup
+
+    client, test_engine = setup
+    monkeypatch.setenv("CRON_SECRET", "test-cleanup-secret")
+    monkeypatch.setattr(cleanup, "CLEANUP_BATCH_SIZE", 1)
+    for _ in range(2):
+        transfer, _ = share(client, s3)
+        make_cleanup_eligible(test_engine, transfer["id"])
+    assert client.get("/api/cron/cleanup", headers=CRON_HEADERS).json() == {
+        "deleted": 1, "failed": 0, "remaining": True,
+    }
+    assert client.get("/api/cron/cleanup", headers=CRON_HEADERS).json() == {
+        "deleted": 1, "failed": 0, "remaining": False,
+    }

@@ -6,7 +6,7 @@ from typing import Annotated
 from uuid import uuid4
 
 from botocore.exceptions import BotoCoreError, ClientError
-from fastapi import Depends, FastAPI, HTTPException, Path
+from fastapi import Depends, FastAPI, HTTPException, Path, Response
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select, update
@@ -14,6 +14,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 import storage
+from cleanup import cleanup_expired
 from db import Transfer, engine
 from storage import StorageNotConfigured, get_s3
 
@@ -21,6 +22,7 @@ app = FastAPI()
 MAX_FILE_SIZE = 25 * 1024 * 1024
 TRANSFER_LIFETIME = timedelta(minutes=10)
 passcode_header = APIKeyHeader(name="X-Upload-Passcode", auto_error=False)
+cron_header = APIKeyHeader(name="Authorization", auto_error=False)
 ShareToken = Annotated[str, Path(min_length=1, max_length=128)]
 
 
@@ -68,6 +70,12 @@ class CompletedTransferResponse(BaseModel):
     expires_at: datetime
 
 
+class CompletionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    share_token: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class SharedFileResponse(BaseModel):
     filename: str
     size_bytes: int
@@ -84,6 +92,16 @@ def require_passcode(passcode: Annotated[str | None, Depends(passcode_header)]):
         raise HTTPException(status_code=503, detail="Transfer creation is not configured.")
     if not passcode or not secrets.compare_digest(passcode.encode(), expected.encode()):
         raise HTTPException(status_code=401, detail="Incorrect or missing upload passcode.")
+
+
+def require_cron_secret(authorization: Annotated[str | None, Depends(cron_header)]):
+    expected = os.getenv("CRON_SECRET")
+    if not expected:
+        raise HTTPException(status_code=503, detail="Cleanup is not configured.")
+    if not authorization or not secrets.compare_digest(
+        authorization.encode(), f"Bearer {expected}".encode()
+    ):
+        raise HTTPException(status_code=401, detail="Unauthorized.")
 
 
 def get_db():
@@ -127,6 +145,25 @@ def find_shared_transfer(session, token):
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/api/cron/cleanup", dependencies=[Depends(require_cron_secret)])
+def cleanup_transfers(
+    response: Response,
+    session: Annotated[Session, Depends(get_db)],
+    s3: Annotated[object, Depends(get_s3)],
+):
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        result = cleanup_expired(session, s3)
+    except (StorageNotConfigured, BotoCoreError, ClientError):
+        raise storage_unavailable() from None
+    except SQLAlchemyError:
+        session.rollback()
+        raise database_unavailable() from None
+    if result["failed"]:
+        response.status_code = 503
+    return result
 
 
 @app.post(
@@ -178,14 +215,25 @@ def complete_transfer(
     transfer_id: str,
     session: Annotated[Session, Depends(get_db)],
     s3: Annotated[object, Depends(get_s3)],
+    payload: CompletionRequest | None = None,
 ):
     transfer = session.get(Transfer, transfer_id)
     if transfer is None:
         raise HTTPException(status_code=404, detail="Transfer not found.")
-    if transfer.status != "pending":
-        raise HTTPException(status_code=409, detail="This transfer is already complete.")
     if is_expired(transfer):
         raise HTTPException(status_code=410, detail="This transfer has expired.")
+    # Clients retain the token before sending completion, so a lost response is
+    # recoverable without storing the plaintext secret or rotating an existing link.
+    share_token = payload.share_token if payload else secrets.token_urlsafe(32)
+    token_hash = hash_token(share_token)
+    if transfer.status != "pending":
+        if payload and transfer.status == "ready" and secrets.compare_digest(
+            transfer.share_token_hash or "", token_hash
+        ):
+            return CompletedTransferResponse(
+                share_token=share_token, expires_at=as_utc(transfer.expires_at)
+            )
+        raise HTTPException(status_code=409, detail="This transfer is already complete.")
 
     try:
         size = storage.uploaded_size(s3, transfer.s3_key)
@@ -202,16 +250,26 @@ def complete_transfer(
             status_code=409, detail="The uploaded file does not match the expected size."
         )
 
-    share_token = secrets.token_urlsafe(32)
     try:
         result = session.execute(
             update(Transfer)
-            .where(Transfer.id == transfer_id, Transfer.status == "pending")
-            .values(status="ready", share_token_hash=hash_token(share_token))
+            .where(
+                Transfer.id == transfer_id,
+                Transfer.status == "pending",
+                Transfer.expires_at > datetime.now(timezone.utc),
+            )
+            .values(status="ready", share_token_hash=token_hash)
+            .execution_options(synchronize_session=False)
         )
         if result.rowcount != 1:
             session.rollback()
-            raise HTTPException(status_code=409, detail="This transfer is already complete.")
+            session.refresh(transfer)
+            if is_expired(transfer):
+                raise HTTPException(status_code=410, detail="This transfer has expired.")
+            if not (payload and transfer.status == "ready" and secrets.compare_digest(
+                transfer.share_token_hash or "", token_hash
+            )):
+                raise HTTPException(status_code=409, detail="This transfer is already complete.")
         session.commit()
     except SQLAlchemyError:
         session.rollback()
