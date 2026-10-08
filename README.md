@@ -41,7 +41,21 @@ Copy [backend/.env.example](backend/.env.example) to `backend/.env` and set:
 - `DATABASE_URL` and `UPLOAD_PASSCODE`
 - `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, and `S3_BUCKET`
 
-The AWS credentials need `s3:PutObject` and `s3:GetObject` access to `transfers/*` in the bucket. Configure bucket CORS to allow `POST` from `http://localhost:5173` with all headers.
+The AWS credentials need `s3:PutObject`, `s3:GetObject`, and `s3:DeleteObject` access to `transfers/*` in the bucket. Configure bucket CORS to allow `POST` from `http://localhost:5173` with all headers.
+
+### Cleanup and retention
+
+Set `CRON_SECRET` to a separate random secret (at least 32 characters) in Vercel's production environment. The daily job in `vercel.json` calls `/api/cron/cleanup` at 08:00 UTC with `Authorization: Bearer <CRON_SECRET>`. This daily schedule works on Vercel Hobby; scheduling can vary within the hour. See [Vercel cron security](https://vercel.com/docs/cron-jobs/manage-cron-jobs).
+
+Each run removes up to 1,000 transfers whose links expired at least one hour ago, including abandoned uploads. Objects are deleted before database records. Failed object deletions retain their records for retry and return HTTP 503. Database failures are also retryable, including when S3 already deleted the objects. A successful response with `remaining: true` means a backlog remains; invoke the same protected endpoint again to drain it. Monitor failures and backlog as traffic grows.
+
+Links expire after 10 minutes; physical deletion happens later. Cleanup includes a one-hour grace period for in-flight requests. Configure an S3 lifecycle rule scoped to `transfers/` to expire objects after one day as a backstop for late uploads or objects with no database record. For versioned or previously versioned buckets, also expire noncurrent versions and remove expired delete markers: deleting a key alone does not erase older versions. Merge these rules with any existing bucket policy rather than replacing unrelated rules. See [S3 lifecycle expiration](https://docs.aws.amazon.com/AmazonS3/latest/userguide/lifecycle-expire-general-considerations.html).
+
+The cleanup endpoint also works locally when `CRON_SECRET` is set in `backend/.env`, but the Vercel schedule runs only after deployment. No bucket settings are changed automatically.
+
+### Retrying an upload
+
+If sharing fails after the file reaches S3, use **Retry sharing** in the same open page. The browser retains the transfer ID and a random completion token and retries without uploading again. Only the token hash is stored in the database; retries return the same link without changing its expiry. Selecting another file or reloading the page discards the in-memory attempt. An expired attempt starts a new transfer on retry. Existing API clients that complete without a token remain supported but cannot recover a lost completion response.
 
 ### Backend
 
@@ -82,6 +96,7 @@ Frontend checks, from a separate terminal at the repository root:
 cd frontend
 npm run build
 npm run lint
+npm test
 ```
 
 GitHub Actions runs these checks on every push and pull request.

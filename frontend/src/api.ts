@@ -55,10 +55,11 @@ export function createTransfer(file: File, passcode: string) {
   })
 }
 
-export function completeTransfer(id: string, passcode: string) {
+export function completeTransfer(id: string, passcode: string, shareToken: string) {
   return request<CompletedTransfer>(`/api/transfers/${encodeURIComponent(id)}/complete`, {
     method: 'POST',
-    headers: { 'X-Upload-Passcode': passcode },
+    headers: { 'Content-Type': 'application/json', 'X-Upload-Passcode': passcode },
+    body: JSON.stringify({ share_token: shareToken }),
   })
 }
 

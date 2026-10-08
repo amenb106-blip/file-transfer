@@ -1,6 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "cd frontend && npm ci && npm run build",
+  "crons": [{ "path": "/api/cron/cleanup", "schedule": "0 8 * * *" }],
   "functions": {
     "app.py": {
       "excludeFiles": "{frontend/node_modules/**,frontend/src/**,backend/tests/**}"

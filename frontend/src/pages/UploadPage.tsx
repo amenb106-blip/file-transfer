@@ -1,13 +1,11 @@
 import QRCode from 'qrcode'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import {
   MAX_FILE_SIZE,
-  completeTransfer,
-  createTransfer,
   formatSize,
-  uploadToStorage,
 } from '../api'
+import { createUploadAttempt } from '../uploadAttempt'
 import { CheckIcon, ClockIcon, CopyIcon, FileIcon, UploadIcon } from '../components/icons'
 
 type Shared = {
@@ -27,6 +25,8 @@ function UploadPage() {
   const [progress, setProgress] = useState<number | null>(null)
   const [shared, setShared] = useState<Shared | null>(null)
   const [copied, setCopied] = useState(false)
+  const attempt = useRef<ReturnType<typeof createUploadAttempt> | null>(null)
+  const [retryCompletion, setRetryCompletion] = useState(false)
   const busy = progress !== null
 
   function copyLink(link: string) {
@@ -37,6 +37,8 @@ function UploadPage() {
   }
 
   function sendAnother() {
+    attempt.current = null
+    setRetryCompletion(false)
     setFile(null)
     setShared(null)
     setCopied(false)
@@ -50,14 +52,14 @@ function UploadPage() {
     setProgress(0)
 
     try {
-      const transfer = await createTransfer(file, passcode)
-      await uploadToStorage(transfer.upload, file, setProgress)
-      const completed = await completeTransfer(transfer.id, passcode)
+      attempt.current ??= createUploadAttempt(file)
+      const completed = await attempt.current.send(passcode, setProgress)
       const link = `${window.location.origin}/d/${completed.share_token}`
       const qrCode = await QRCode.toDataURL(link, { width: 416, margin: 1 }).catch(() => null)
       setShared({ link, qrCode, expiresAt: completed.expires_at })
       setPasscode('')
     } catch (error) {
+      setRetryCompletion(attempt.current?.uploaded ?? false)
       setError(error instanceof Error ? error.message : 'Could not send the file.')
     } finally {
       setProgress(null)
@@ -137,6 +139,8 @@ function UploadPage() {
 
               setError('')
               setFile(null)
+              attempt.current = null
+              setRetryCompletion(false)
 
               if (selectedFile && (selectedFile.size === 0 || selectedFile.size > MAX_FILE_SIZE)) {
                 setError('Choose a nonempty file no larger than 25 MB.')
@@ -168,7 +172,7 @@ function UploadPage() {
         {progress !== null && (
           <div className="progress">
             <div className="progress-label">
-              <span>Uploading…</span>
+              <span>{progress === 1 ? 'Finishing…' : 'Uploading…'}</span>
               <span className="mono">{Math.round(progress * 100)}%</span>
             </div>
             <progress value={progress} max={1} aria-label="Upload progress" />
@@ -192,7 +196,7 @@ function UploadPage() {
 
         <button type="submit" className="button primary wide" disabled={!file || !passcode || busy}>
           <UploadIcon />
-          {busy ? 'Sending…' : 'Send file'}
+          {busy ? 'Sending…' : retryCompletion ? 'Retry sharing' : 'Send file'}
         </button>
 
         {error && <p role="alert" className="error">{error}</p>}
