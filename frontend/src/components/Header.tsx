@@ -18,9 +18,14 @@ function Header() {
         <LogoMark />
         File Transfer
       </a>
-      <button type="button" className="theme-toggle" onClick={toggleTheme}>
+      <button
+        type="button"
+        className="theme-toggle"
+        onClick={toggleTheme}
+        aria-label={`Switch to ${next} mode`}
+        title={`Switch to ${next} mode`}
+      >
         {next === 'dark' ? <MoonIcon size={18} /> : <SunIcon size={18} />}
-        {next === 'dark' ? 'Dark mode' : 'Light mode'}
       </button>
     </header>
   )

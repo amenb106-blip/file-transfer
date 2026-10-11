@@ -24,10 +24,10 @@ function Icon({ size = 20, children }: IconProps & { children: ReactNode }) {
 
 export function LogoMark() {
   return (
-    <svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true">
+    <svg width="32" height="32" viewBox="0 0 28 28" aria-hidden="true">
       <rect width="28" height="28" rx="8" fill="var(--accent)" />
       <path
-        d="M9 15l5-5 5 5M14 10v9"
+        d="M8 10h12m-3-3 3 3-3 3M20 18H8m3-3-3 3 3 3"
         stroke="var(--on-accent)"
         strokeWidth="2"
         fill="none"
@@ -52,6 +52,23 @@ export function UploadIcon(props: IconProps) {
     <Icon {...props}>
       <path d="M12 16V4M7 9l5-5 5 5" />
       <path d="M5 20h14" />
+    </Icon>
+  )
+}
+
+export function ArrowRightIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M5 12h14m-5-5 5 5-5 5" />
+    </Icon>
+  )
+}
+
+export function KeyIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <circle cx="15.5" cy="8.5" r="4.5" />
+      <path d="m12.2 11.8-8 8H2v-3l8-8M6 16l2 2" />
     </Icon>
   )
 }

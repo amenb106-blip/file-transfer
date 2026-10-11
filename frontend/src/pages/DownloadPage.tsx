@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
-import { ApiError, formatSize, getDownloadUrl, getSharedFile } from '../api'
+import { ApiError, getDownloadUrl, getSharedFile } from '../api'
 import type { SharedFile } from '../api'
-import { ClockIcon, DownloadIcon, FileIcon, LinkIcon } from '../components/icons'
+import FileSummary from '../components/FileSummary'
+import TransferLayout from '../components/TransferLayout'
+import { ClockIcon, DownloadIcon, LinkIcon } from '../components/icons'
 
 type Notice = {
   kind: 'expired' | 'invalid' | 'other'
@@ -69,47 +71,41 @@ function DownloadPage({ token }: { token: string }) {
 
   if (notice) {
     return (
-      <main className="content">
-        <section className="card notice" role="alert">
+      <TransferLayout title={notice.title}>
+        <div className="notice" role="alert">
           <span className={`notice-icon ${notice.kind}`}>
             {notice.kind === 'invalid' ? <LinkIcon size={30} /> : <ClockIcon size={30} />}
           </span>
-          <div className="stack-sm">
-            <h1>{notice.title}</h1>
-            <p className="muted">{notice.detail}</p>
-          </div>
-        </section>
-      </main>
+          <p className="muted">{notice.detail}</p>
+        </div>
+      </TransferLayout>
     )
   }
 
   if (!file) {
     return (
-      <main className="content">
-        <p className="muted center">Loading…</p>
-      </main>
+      <TransferLayout title="Download file">
+        <p className="muted" role="status">Loading…</p>
+      </TransferLayout>
     )
   }
 
   return (
-    <main className="content">
-      <section className="card download">
-        <p className="muted strong">Someone sent you a file</p>
-        <span className="file-icon large"><FileIcon size={32} /></span>
-        <div className="stack-sm">
-          <h1 className="file-title">{file.filename}</h1>
-          <p className="muted">
-            {formatSize(file.size_bytes)} · Expires in {minutesLeft(file.expires_at)}
-          </p>
+    <TransferLayout title="Download file">
+      <div className="download">
+        <div className="file-box chosen">
+          <FileSummary name={file.filename} size={file.size_bytes} />
         </div>
-        <button type="button" className="button primary wide" onClick={download} disabled={downloading}>
-          <DownloadIcon />
-          {downloading ? 'Starting download…' : 'Download'}
-        </button>
+        <div className="send-actions">
+          <p className="expires"><ClockIcon size={14} />Expires in {minutesLeft(file.expires_at)}</p>
+          <button type="button" className="button primary" onClick={download} disabled={downloading}>
+            <DownloadIcon size={17} />
+            {downloading ? 'Starting download…' : 'Download file'}
+          </button>
+        </div>
         {downloadError && <p role="alert" className="error">{downloadError}</p>}
-      </section>
-      <p className="footnote">Links stop working 10 minutes after the file is sent.</p>
-    </main>
+      </div>
+    </TransferLayout>
   )
 }
 
