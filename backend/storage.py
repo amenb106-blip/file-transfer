@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timezone
 from functools import lru_cache
 from urllib.parse import quote
 
@@ -10,6 +11,10 @@ DOWNLOAD_URL_SECONDS = 60
 
 
 class StorageNotConfigured(Exception):
+    pass
+
+
+class DownloadExpired(Exception):
     pass
 
 
@@ -46,7 +51,11 @@ def uploaded_size(s3, key):
     return s3.head_object(Bucket=bucket_name(), Key=key)["ContentLength"]
 
 
-def download_url(s3, key, filename):
+def download_url(s3, key, filename, expires_at):
+    # Round down: even the final partial second must not extend link access.
+    remaining_seconds = int((expires_at - datetime.now(timezone.utc)).total_seconds())
+    if remaining_seconds < 1:
+        raise DownloadExpired
     return s3.generate_presigned_url(
         "get_object",
         Params={
@@ -54,7 +63,7 @@ def download_url(s3, key, filename):
             "Key": key,
             "ResponseContentDisposition": content_disposition(filename),
         },
-        ExpiresIn=DOWNLOAD_URL_SECONDS,
+        ExpiresIn=min(DOWNLOAD_URL_SECONDS, remaining_seconds),
     )
 
 

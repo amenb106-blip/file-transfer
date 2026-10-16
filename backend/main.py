@@ -297,7 +297,11 @@ def download_shared_file(
 ):
     transfer = find_shared_transfer(session, token)
     try:
-        url = storage.download_url(s3, transfer.s3_key, transfer.filename)
+        url = storage.download_url(
+            s3, transfer.s3_key, transfer.filename, as_utc(transfer.expires_at)
+        )
+    except storage.DownloadExpired:
+        raise HTTPException(status_code=410, detail="This link has expired.") from None
     except (StorageNotConfigured, BotoCoreError, ClientError):
         raise storage_unavailable() from None
     try:

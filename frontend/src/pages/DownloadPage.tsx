@@ -4,6 +4,7 @@ import type { SharedFile } from '../api'
 import FileSummary from '../components/FileSummary'
 import TransferLayout from '../components/TransferLayout'
 import { ClockIcon, DownloadIcon, LinkIcon } from '../components/icons'
+import { minutesLeft, watchExpiration } from '../expiration'
 
 type Notice = {
   kind: 'expired' | 'invalid' | 'other'
@@ -33,16 +34,12 @@ function describeProblem(error: unknown): Notice {
   }
 }
 
-function minutesLeft(expiresAt: string) {
-  const minutes = Math.max(0, Math.ceil((Date.parse(expiresAt) - Date.now()) / 60_000))
-  return minutes === 1 ? '1 minute' : `${minutes} minutes`
-}
-
 function DownloadPage({ token }: { token: string }) {
   const [file, setFile] = useState<SharedFile | null>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
   const [downloadError, setDownloadError] = useState('')
   const [downloading, setDownloading] = useState(false)
+  const [now, setNow] = useState(Date.now)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -54,7 +51,16 @@ function DownloadPage({ token }: { token: string }) {
     return () => controller.abort()
   }, [token])
 
+  useEffect(() => {
+    if (!file) return
+    return watchExpiration(file.expires_at, setNow)
+  }, [file])
+
   async function download() {
+    if (file && Date.now() >= Date.parse(file.expires_at)) {
+      setNow(Date.now())
+      return
+    }
     setDownloadError('')
     setDownloading(true)
     try {
@@ -69,14 +75,18 @@ function DownloadPage({ token }: { token: string }) {
     }
   }
 
-  if (notice) {
+  const currentNotice = notice ?? (file && now >= Date.parse(file.expires_at)
+    ? describeProblem(new ApiError(410, 'This link has expired.'))
+    : null)
+
+  if (currentNotice) {
     return (
-      <TransferLayout title={notice.title}>
+      <TransferLayout title={currentNotice.title}>
         <div className="notice" role="alert">
-          <span className={`notice-icon ${notice.kind}`}>
-            {notice.kind === 'invalid' ? <LinkIcon size={30} /> : <ClockIcon size={30} />}
+          <span className={`notice-icon ${currentNotice.kind}`}>
+            {currentNotice.kind === 'invalid' ? <LinkIcon size={30} /> : <ClockIcon size={30} />}
           </span>
-          <p className="muted">{notice.detail}</p>
+          <p className="muted">{currentNotice.detail}</p>
         </div>
       </TransferLayout>
     )
@@ -97,7 +107,7 @@ function DownloadPage({ token }: { token: string }) {
           <FileSummary name={file.filename} size={file.size_bytes} />
         </div>
         <div className="send-actions">
-          <p className="expires"><ClockIcon size={14} />Expires in {minutesLeft(file.expires_at)}</p>
+          <p className="expires"><ClockIcon size={14} />Expires in {minutesLeft(file.expires_at, now)}</p>
           <button type="button" className="button primary" onClick={download} disabled={downloading}>
             <DownloadIcon size={17} />
             {downloading ? 'Starting download…' : 'Download file'}

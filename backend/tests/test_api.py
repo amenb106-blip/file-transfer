@@ -343,6 +343,43 @@ def test_download_returns_short_lived_link_and_counts(setup, s3):
     assert all_transfers(test_engine)[0].download_count == 1
 
 
+@pytest.mark.parametrize("remaining", [5, 1.9, 0.5, 0, -1])
+def test_download_signature_never_outlives_transfer(setup, s3, monkeypatch, remaining):
+    import storage
+    import botocore.auth
+
+    client, test_engine = setup
+    transfer, token = share(client, s3)
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    expires_at = now + timedelta(seconds=remaining)
+    with Session(test_engine) as session:
+        session.get(Transfer, transfer["id"]).expires_at = expires_at
+        session.commit()
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now if tz else now.replace(tzinfo=None)
+
+    monkeypatch.setattr(storage, "datetime", Clock)
+    monkeypatch.setattr(botocore.auth, "get_current_datetime", lambda: now)
+    # Keep initial lookup at the earlier time to exercise expiration during signing.
+    import main
+    monkeypatch.setattr(main, "is_expired", lambda transfer: False)
+    response = client.post(f"/api/share/{token}/download")
+    if remaining < 1:
+        assert response.status_code == 410
+        assert all_transfers(test_engine)[0].download_count == 0
+    else:
+        assert response.status_code == 200
+        query = parse_qs(urlparse(response.json()["url"]).query)
+        lifetime = int(query["X-Amz-Expires"][0])
+        signed_at = datetime.strptime(query["X-Amz-Date"][0], "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+        assert lifetime == int(remaining)
+        assert signed_at + timedelta(seconds=lifetime) <= expires_at
+        assert all_transfers(test_engine)[0].download_count == 1
+
+
 @pytest.mark.parametrize("token", ["not-a-real-token", "x" * 128])
 def test_unknown_token_is_refused(setup, token):
     client, _ = setup
