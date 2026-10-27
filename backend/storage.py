@@ -8,6 +8,8 @@ from botocore.config import Config
 
 UPLOAD_URL_SECONDS = 10 * 60
 DOWNLOAD_URL_SECONDS = 60
+PART_SIZE = 8 * 1024 * 1024
+MAX_MULTIPART_SIZE = 512 * 1024 * 1024
 
 
 class StorageNotConfigured(Exception):
@@ -49,6 +51,43 @@ def upload_permission(s3, key, size_bytes):
 
 def uploaded_size(s3, key):
     return s3.head_object(Bucket=bucket_name(), Key=key)["ContentLength"]
+
+
+def start_multipart(s3, key):
+    return s3.create_multipart_upload(Bucket=bucket_name(), Key=key)["UploadId"]
+
+
+def abort_multipart(s3, key, upload_id):
+    from botocore.exceptions import ClientError
+
+    try:
+        s3.abort_multipart_upload(Bucket=bucket_name(), Key=key, UploadId=upload_id)
+    except ClientError as error:
+        if error.response.get("Error", {}).get("Code") != "NoSuchUpload":
+            raise
+
+
+def part_permission(s3, key, upload_id, number, size, lifetime):
+    return s3.generate_presigned_url(
+        "upload_part",
+        Params={"Bucket": bucket_name(), "Key": key, "UploadId": upload_id,
+                "PartNumber": number, "ContentLength": size},
+        ExpiresIn=min(UPLOAD_URL_SECONDS, lifetime),
+    )
+
+
+def multipart_parts(s3, key, upload_id):
+    pages = s3.get_paginator("list_parts").paginate(
+        Bucket=bucket_name(), Key=key, UploadId=upload_id,
+    )
+    return [part for page in pages for part in page.get("Parts", [])]
+
+
+def finish_multipart(s3, key, upload_id, parts):
+    s3.complete_multipart_upload(
+        Bucket=bucket_name(), Key=key, UploadId=upload_id,
+        MultipartUpload={"Parts": parts},
+    )
 
 
 def download_url(s3, key, filename, expires_at):

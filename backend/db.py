@@ -4,7 +4,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from sqlalchemy import BigInteger, Column, DateTime, Integer, String, create_engine
+from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Integer, String, create_engine
 from sqlalchemy.orm import DeclarativeBase
 
 load_dotenv(Path(__file__).with_name(".env"))
@@ -49,6 +49,13 @@ class Transfer(Base):
         default=lambda: datetime.now(timezone.utc) + timedelta(minutes=10),
     )
     download_count = Column(Integer, nullable=False, default=0)
+
+
+class MultipartUpload(Base):
+    __tablename__ = "multipart_uploads"
+
+    transfer_id = Column(String(36), ForeignKey("transfers.id"), primary_key=True)
+    upload_id = Column(String(1024), nullable=False)
 
 
 if __name__ == "__main__":

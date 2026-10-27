@@ -2,7 +2,8 @@
 import { useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { MAX_FILE_SIZE } from '../api'
-import { createUploadAttempt } from '../uploadAttempt'
+import { createMultipartAttempt } from '../multipartAttempt'
+import type { UploadRetry } from '../multipartAttempt'
 import FileSummary from '../components/FileSummary'
 import TransferLayout from '../components/TransferLayout'
 import { ArrowRightIcon, CheckIcon, ClockIcon, CopyIcon, KeyIcon, UploadIcon } from '../components/icons'
@@ -20,9 +21,13 @@ function UploadPage() {
   const [shared, setShared] = useState<Shared | null>(null)
   const [copied, setCopied] = useState(false)
   const [dragging, setDragging] = useState(false)
-  const attempt = useRef<ReturnType<typeof createUploadAttempt> | null>(null)
+  const attempt = useRef<ReturnType<typeof createMultipartAttempt> | null>(null)
   const [retryCompletion, setRetryCompletion] = useState(false)
-  const busy = progress !== null
+  const [canceling, setCanceling] = useState(false)
+  const [notice, setNotice] = useState('')
+  const [hasAttempt, setHasAttempt] = useState(false)
+  const [retry, setRetry] = useState<UploadRetry | null>(null)
+  const busy = progress !== null || canceling
 
   async function copyLink(link: string) {
     try {
@@ -37,8 +42,10 @@ function UploadPage() {
   function selectFiles(files: FileList | null) {
     if (busy || !files?.length) return
     setError('')
+    setNotice('')
     setFile(null)
     attempt.current = null
+    setHasAttempt(false)
     setRetryCompletion(false)
     if (files.length !== 1) {
       setError('Choose one file at a time.')
@@ -46,7 +53,7 @@ function UploadPage() {
     }
     const selected = files[0]
     if (selected.size === 0 || selected.size > MAX_FILE_SIZE) {
-      setError('Choose a nonempty file no larger than 25 MB.')
+      setError('Choose a nonempty file no larger than 512 MiB.')
       return
     }
     setFile(selected)
@@ -54,6 +61,7 @@ function UploadPage() {
 
   function sendAnother() {
     attempt.current = null
+    setHasAttempt(false)
     setRetryCompletion(false)
     setFile(null)
     setShared(null)
@@ -65,20 +73,42 @@ function UploadPage() {
     event.preventDefault()
     if (!file || !passcode || busy) return
     setError('')
+    setNotice('')
     setDragging(false)
     setProgress(0)
     try {
-      attempt.current ??= createUploadAttempt(file)
-      const completed = await attempt.current.send(passcode, setProgress)
+      attempt.current ??= createMultipartAttempt(file)
+      setHasAttempt(true)
+      const completed = await attempt.current.send(passcode, setProgress, setRetry)
       const link = `${window.location.origin}/d/${completed.share_token}`
       const qrCode = await QRCode.toDataURL(link, { width: 416, margin: 4 }).catch(() => null)
       setShared({ link, qrCode, expiresAt: completed.expires_at })
       setPasscode('')
     } catch (error) {
       setRetryCompletion(attempt.current?.uploaded ?? false)
-      setError(error instanceof Error ? error.message : 'Could not send the file.')
+      if (!(error instanceof DOMException && error.name === 'AbortError')) {
+        setError(error instanceof Error ? error.message : 'Could not send the file.')
+      }
     } finally {
       setProgress(null)
+    }
+  }
+
+  async function cancelUpload() {
+    if (!attempt.current || canceling) return
+    setCanceling(true)
+    setError('')
+    try {
+      await attempt.current.cancel(passcode)
+      attempt.current = null
+      setHasAttempt(false)
+      setRetryCompletion(false)
+      setNotice('Upload canceled. You can send this file again or choose another.')
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Could not cancel the upload. Try again.')
+    } finally {
+      setProgress(null)
+      setCanceling(false)
     }
   }
 
@@ -129,7 +159,7 @@ function UploadPage() {
             setDragging(false)
             selectFiles(event.dataTransfer.files)
           }}>
-          <div className="field-heading"><span className="field-label">File</span><span id="file-limit" className="muted small">25 MB max</span></div>
+          <div className="field-heading"><span className="field-label">File</span><span id="file-limit" className="muted small">512 MiB max</span></div>
           <input id="file" type="file" className="visually-hidden file-input" disabled={busy}
             aria-label={file ? 'Change file' : 'Choose a file'} aria-describedby="file-limit"
             onChange={(event) => { selectFiles(event.target.files); event.target.value = '' }} />
@@ -142,7 +172,9 @@ function UploadPage() {
           </label>}
         </div>
         {progress !== null ? <div className="progress">
-          <div className="progress-label"><span>{progress === 1 ? 'Preparing share link…' : 'Uploading…'}</span><span className="mono">{Math.round(progress * 100)}%</span></div>
+          <div className="progress-label"><span role="status">{retry
+            ? `Connection interrupted. Retrying part ${retry.part} shortly (${retry.attempt}/${retry.maxRetries})…`
+            : progress === 1 ? 'Preparing share link…' : 'Uploading…'}</span><span className="mono">{Math.round(progress * 100)}%</span></div>
           <progress value={progress} max={1} aria-label="Upload progress" />
         </div> : <div className="field">
           <label htmlFor="passcode" className="field-label">Upload passcode</label>
@@ -152,12 +184,15 @@ function UploadPage() {
           </div>
         </div>}
         <div className="send-actions">
-          <p className="expires"><ClockIcon size={14} />Links expire after 10 minutes.</p>
+          <p className="expires"><ClockIcon size={14} />Links last 10 minutes after upload.</p>
+          {hasAttempt && progress !== 1 && <button type="button" className="button secondary"
+            onClick={cancelUpload} disabled={canceling}>{canceling ? 'Canceling…' : 'Cancel upload'}</button>}
           <button type="submit" className="button primary" disabled={!file || !passcode || busy}>
             {busy ? 'Sending…' : retryCompletion ? 'Retry sharing' : 'Send file'}<ArrowRightIcon size={17} />
           </button>
         </div>
         {error && <p role="alert" className="error">{error}</p>}
+        {notice && <p role="status" className="muted">{notice}</p>}
       </form>
     </TransferLayout>
   )

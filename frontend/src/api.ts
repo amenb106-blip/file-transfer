@@ -1,4 +1,4 @@
-export const MAX_FILE_SIZE = 25 * 1024 * 1024
+export const MAX_FILE_SIZE = 512 * 1024 * 1024
 
 export type CreatedTransfer = {
   id: string
@@ -33,6 +33,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     response = await fetch(path, init)
   } catch {
+    init?.signal?.throwIfAborted()
     throw new ApiError(0, 'Could not reach the server. Check your connection and try again.')
   }
   if (!response.ok) {
@@ -101,4 +102,63 @@ export function formatSize(bytes: number) {
   return bytes < 1024 * 1024
     ? `${Math.max(1, Math.round(bytes / 1024))} KB`
     : `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+export type MultipartTransfer = Omit<CreatedTransfer, 'upload'> & { part_size: number }
+export type UploadedPart = { number: number; etag: string }
+
+export function createMultipartTransfer(file: File, passcode: string) {
+  return request<MultipartTransfer>('/api/multipart-transfers', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Upload-Passcode': passcode },
+    body: JSON.stringify({ filename: file.name, size_bytes: file.size }),
+  })
+}
+
+export function getPartUrl(id: string, number: number, passcode: string, signal?: AbortSignal) {
+  return request<{ url: string }>(`/api/multipart-transfers/${encodeURIComponent(id)}/parts/${number}`, {
+    method: 'POST', headers: { 'X-Upload-Passcode': passcode }, signal,
+  })
+}
+
+export function completeMultipartTransfer(id: string, passcode: string, shareToken: string, parts: UploadedPart[]) {
+  return request<CompletedTransfer>(`/api/multipart-transfers/${encodeURIComponent(id)}/complete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Upload-Passcode': passcode },
+    body: JSON.stringify({ share_token: shareToken, parts }),
+  })
+}
+
+export function cancelMultipartTransfer(id: string, passcode: string) {
+  return request<{ status: string }>(`/api/multipart-transfers/${encodeURIComponent(id)}`, {
+    method: 'DELETE', headers: { 'X-Upload-Passcode': passcode },
+  })
+}
+
+export function uploadPart(url: string, body: Blob, onProgress: (bytes: number) => void, signal: AbortSignal) {
+  return new Promise<string>((resolve, reject) => {
+    signal.throwIfAborted()
+    const xhr = new XMLHttpRequest()
+    const abort = () => xhr.abort()
+    const finish = (error?: Error, etag?: string) => {
+      signal.removeEventListener('abort', abort)
+      if (error) reject(error)
+      else resolve(etag!)
+    }
+    xhr.open('PUT', url)
+    xhr.timeout = 120_000
+    xhr.upload.onprogress = (event) => { if (event.lengthComputable) onProgress(event.loaded) }
+    xhr.onload = () => {
+      const etag = xhr.getResponseHeader('ETag')
+      if (xhr.status >= 200 && xhr.status < 300 && etag) finish(undefined, etag)
+      else finish(new ApiError(xhr.status, xhr.status >= 200 && xhr.status < 300
+        ? 'Could not confirm the uploaded part. Retry the upload or contact the site owner.'
+        : 'The upload was rejected. Retry the upload.'))
+    }
+    xhr.onerror = () => finish(new ApiError(0, 'Upload interrupted. Retry to continue from completed parts.'))
+    xhr.ontimeout = () => finish(new ApiError(0, 'Upload timed out. Retry to continue from completed parts.'))
+    xhr.onabort = () => finish(new DOMException('Upload stopped.', 'AbortError'))
+    signal.addEventListener('abort', abort, { once: true })
+    xhr.send(body)
+  })
 }

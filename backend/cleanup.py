@@ -3,9 +3,10 @@
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete, select
+from botocore.exceptions import BotoCoreError, ClientError
 
-from db import Transfer
-from storage import bucket_name
+from db import MultipartUpload, Transfer
+from storage import abort_multipart, bucket_name
 
 # Allow time for in-flight uploads/downloads to finish after link expiration.
 # An S3 lifecycle rule is still needed for late uploads and noncurrent versions.
@@ -22,13 +23,21 @@ def cleanup_expired(session, s3):
         .limit(CLEANUP_BATCH_SIZE)
     ).all()
     failed_keys = set()
-    keys = [transfer.s3_key for transfer in transfers if transfer.s3_key]
+    for transfer in transfers:
+        upload = session.get(MultipartUpload, transfer.id)
+        if upload:
+            try:
+                abort_multipart(s3, transfer.s3_key, upload.upload_id)
+            except (BotoCoreError, ClientError):
+                failed_keys.add(transfer.s3_key)
+    keys = [transfer.s3_key for transfer in transfers
+            if transfer.s3_key and transfer.s3_key not in failed_keys]
     if keys:
         result = s3.delete_objects(
             Bucket=bucket_name(),
             Delete={"Objects": [{"Key": key} for key in keys], "Quiet": True},
         )
-        failed_keys = {error["Key"] for error in result.get("Errors", [])}
+        failed_keys.update(error["Key"] for error in result.get("Errors", []))
 
     deleted_ids = [
         transfer.id for transfer in transfers if transfer.s3_key not in failed_keys
@@ -36,6 +45,7 @@ def cleanup_expired(session, s3):
     # Delete objects first. On a database failure the next run safely deletes the
     # already-missing objects again; S3 failures keep their records for retries.
     if deleted_ids:
+        session.execute(delete(MultipartUpload).where(MultipartUpload.transfer_id.in_(deleted_ids)))
         session.execute(delete(Transfer).where(Transfer.id.in_(deleted_ids)))
         session.commit()
     remaining = session.scalar(

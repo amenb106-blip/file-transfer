@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 import storage
 from cleanup import cleanup_expired
-from db import Transfer, engine
+from db import MultipartUpload, Transfer, engine
 from storage import StorageNotConfigured, get_s3
 
 app = FastAPI()
@@ -217,6 +217,8 @@ def complete_transfer(
     s3: Annotated[object, Depends(get_s3)],
     payload: CompletionRequest | None = None,
 ):
+    if session.get(MultipartUpload, transfer_id) is not None:
+        raise HTTPException(status_code=409, detail="Use multipart completion for this upload.")
     transfer = session.get(Transfer, transfer_id)
     if transfer is None:
         raise HTTPException(status_code=404, detail="Transfer not found.")
@@ -317,3 +319,178 @@ def download_shared_file(
             status_code=503, detail="Could not start the download. Try again later."
         ) from None
     return DownloadResponse(url=url)
+
+
+class MultipartRequest(TransferRequest):
+    size_bytes: int = Field(strict=True, gt=0, le=storage.MAX_MULTIPART_SIZE)
+
+
+class MultipartCreated(TransferResponse):
+    part_size: int
+
+
+class CompletedPart(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    number: int = Field(strict=True, ge=1, le=64)
+    etag: str = Field(min_length=1, max_length=128)
+
+
+class MultipartCompletion(CompletionRequest):
+    parts: list[CompletedPart] = Field(min_length=1, max_length=64)
+
+
+def multipart_record(session, transfer_id):
+    # Serialize completion, cancellation, and permission issuance in PostgreSQL.
+    transfer = session.scalar(
+        select(Transfer).where(Transfer.id == transfer_id).with_for_update()
+    )
+    upload = session.get(MultipartUpload, transfer_id)
+    if transfer is None or upload is None:
+        raise HTTPException(status_code=404, detail="Upload not found.")
+    return transfer, upload
+
+
+def require_pending_upload(transfer):
+    if transfer.status != "pending":
+        raise HTTPException(status_code=409, detail="This upload is no longer pending.")
+    if is_expired(transfer):
+        raise HTTPException(status_code=410, detail="This upload has expired. Start again.")
+
+
+@app.post("/api/multipart-transfers", status_code=201, response_model=MultipartCreated,
+          dependencies=[Depends(require_passcode)])
+def create_multipart_transfer(
+    payload: MultipartRequest,
+    session: Annotated[Session, Depends(get_db)],
+    s3: Annotated[object, Depends(get_s3)],
+):
+    now = datetime.now(timezone.utc)
+    transfer = Transfer(
+        id=str(uuid4()), filename=payload.filename, size_bytes=payload.size_bytes,
+        created_at=now, expires_at=now + timedelta(hours=1),
+    )
+    transfer.s3_key = storage.object_key(transfer.id)
+    upload_id = None
+    try:
+        session.add(transfer)
+        session.flush()
+        upload_id = storage.start_multipart(s3, transfer.s3_key)
+        session.add(MultipartUpload(transfer_id=transfer.id, upload_id=upload_id))
+        response = MultipartCreated(
+            **TransferResponse.model_validate(transfer).model_dump(), part_size=storage.PART_SIZE,
+        )
+        session.commit()
+        return response
+    except (SQLAlchemyError, StorageNotConfigured, BotoCoreError, ClientError) as error:
+        session.rollback()
+        if upload_id:
+            try:
+                storage.abort_multipart(s3, transfer.s3_key, upload_id)
+            except (StorageNotConfigured, BotoCoreError, ClientError):
+                # The bucket's AbortIncompleteMultipartUpload rule is the backstop.
+                pass
+        if isinstance(error, SQLAlchemyError):
+            raise database_unavailable() from None
+        raise storage_unavailable() from None
+
+
+@app.post("/api/multipart-transfers/{transfer_id}/parts/{number}",
+          dependencies=[Depends(require_passcode)])
+def sign_upload_part(
+    transfer_id: str, number: Annotated[int, Path(ge=1, le=64)],
+    session: Annotated[Session, Depends(get_db)],
+    s3: Annotated[object, Depends(get_s3)],
+):
+    try:
+        transfer, upload = multipart_record(session, transfer_id)
+        require_pending_upload(transfer)
+        size = min(storage.PART_SIZE, transfer.size_bytes - (number - 1) * storage.PART_SIZE)
+        if size <= 0:
+            raise HTTPException(status_code=422, detail="Invalid part number for this file.")
+        remaining = int((as_utc(transfer.expires_at) - datetime.now(timezone.utc)).total_seconds())
+        if remaining < 1:
+            raise HTTPException(status_code=410, detail="This upload has expired. Start again.")
+        return {"url": storage.part_permission(
+            s3, transfer.s3_key, upload.upload_id, number, size, remaining,
+        )}
+    except (StorageNotConfigured, BotoCoreError, ClientError):
+        raise storage_unavailable() from None
+    except SQLAlchemyError:
+        session.rollback()
+        raise database_unavailable() from None
+
+
+@app.post("/api/multipart-transfers/{transfer_id}/complete",
+          response_model=CompletedTransferResponse, dependencies=[Depends(require_passcode)])
+def complete_multipart_transfer(
+    transfer_id: str, payload: MultipartCompletion,
+    session: Annotated[Session, Depends(get_db)],
+    s3: Annotated[object, Depends(get_s3)],
+):
+    try:
+        transfer, upload = multipart_record(session, transfer_id)
+        token_hash = hash_token(payload.share_token)
+        if transfer.status == "ready" and secrets.compare_digest(transfer.share_token_hash or "", token_hash):
+            if is_expired(transfer):
+                raise HTTPException(status_code=410, detail="This link has expired.")
+            return CompletedTransferResponse(share_token=payload.share_token, expires_at=as_utc(transfer.expires_at))
+        require_pending_upload(transfer)
+        count = (transfer.size_bytes + storage.PART_SIZE - 1) // storage.PART_SIZE
+        if [part.number for part in payload.parts] != list(range(1, count + 1)):
+            raise HTTPException(status_code=422, detail="Include each file part once, in order.")
+        # A prior CompleteMultipartUpload may have succeeded before its response or
+        # database commit was lost. The unique key is never reused for another file.
+        try:
+            size = storage.uploaded_size(s3, transfer.s3_key)
+        except ClientError as error:
+            if error.response.get("Error", {}).get("Code") not in {"404", "NoSuchKey"}:
+                raise
+            parts = storage.multipart_parts(s3, transfer.s3_key, upload.upload_id)
+            expected = [(part.number, part.etag,
+                         min(storage.PART_SIZE, transfer.size_bytes - (part.number - 1) * storage.PART_SIZE))
+                        for part in payload.parts]
+            actual = [(part["PartNumber"], part["ETag"], part["Size"]) for part in parts]
+            if actual != expected:
+                raise HTTPException(status_code=409, detail="Uploaded parts do not match the file. Retry the upload.")
+            storage.finish_multipart(s3, transfer.s3_key, upload.upload_id,
+                                     [{"PartNumber": p.number, "ETag": p.etag} for p in payload.parts])
+            size = storage.uploaded_size(s3, transfer.s3_key)
+        if size != transfer.size_bytes:
+            raise HTTPException(status_code=409, detail="The uploaded file does not match the expected size.")
+        if is_expired(transfer):
+            raise HTTPException(status_code=410, detail="This upload has expired. Start again.")
+        transfer.status = "ready"
+        transfer.share_token_hash = token_hash
+        transfer.expires_at = datetime.now(timezone.utc) + TRANSFER_LIFETIME
+        response = CompletedTransferResponse(share_token=payload.share_token, expires_at=transfer.expires_at)
+        session.commit()
+        return response
+    except (StorageNotConfigured, BotoCoreError, ClientError):
+        raise storage_unavailable() from None
+    except SQLAlchemyError:
+        session.rollback()
+        raise database_unavailable() from None
+
+
+@app.delete("/api/multipart-transfers/{transfer_id}", dependencies=[Depends(require_passcode)])
+def cancel_multipart_transfer(
+    transfer_id: str,
+    session: Annotated[Session, Depends(get_db)],
+    s3: Annotated[object, Depends(get_s3)],
+):
+    try:
+        transfer, upload = multipart_record(session, transfer_id)
+        if transfer.status == "ready":
+            raise HTTPException(status_code=409, detail="This file is already shared.")
+        # Repeat aborts safely, including after an interrupted cancellation.
+        storage.abort_multipart(s3, transfer.s3_key, upload.upload_id)
+        s3.delete_object(Bucket=storage.bucket_name(), Key=transfer.s3_key)
+        transfer.status = "canceled"
+        transfer.expires_at = datetime.now(timezone.utc)
+        session.commit()
+        return {"status": "canceled"}
+    except (StorageNotConfigured, BotoCoreError, ClientError):
+        raise storage_unavailable() from None
+    except SQLAlchemyError:
+        session.rollback()
+        raise database_unavailable() from None
