@@ -1,5 +1,6 @@
 import { ApiError, cancelMultipartTransfer, completeMultipartTransfer, createMultipartTransfer, getPartUrl, uploadPart } from './api.ts'
 import type { MultipartTransfer, UploadedPart } from './api.ts'
+import { clearSavedUpload, saveUpload } from './savedUpload.ts'
 
 const defaultOperations = { cancelMultipartTransfer, completeMultipartTransfer, createMultipartTransfer, getPartUrl, uploadPart }
 const MAX_PART_RETRIES = 3
@@ -31,7 +32,7 @@ function waitForRetry(delayMs: number, signal: AbortSignal) {
 }
 
 // Keep confirmed parts and the completion token across retries in this tab.
-// Persistence and resuming after a refresh are deliberately a separate stage.
+// Save checkpoints for the next stage: validating and restoring after a refresh.
 export function createMultipartAttempt(file: File, operations = defaultOperations) {
   let transfer: MultipartTransfer | null = null
   let parts: UploadedPart[] = []
@@ -44,6 +45,7 @@ export function createMultipartAttempt(file: File, operations = defaultOperation
 
   async function run(passcode: string, progress: (fraction: number) => void, onRetry: (retry: UploadRetry | null) => void) {
     if (transfer && Date.parse(transfer.expires_at) <= Date.now()) {
+      clearSavedUpload(transfer.id)
       transfer = null
       parts = []
     }
@@ -51,6 +53,7 @@ export function createMultipartAttempt(file: File, operations = defaultOperation
       token = Array.from(crypto.getRandomValues(new Uint8Array(32)), b => b.toString(16).padStart(2, '0')).join('')
       // Do not abort creation: retain its ID so cancellation can clean it up.
       transfer = await operations.createMultipartTransfer(file, passcode)
+      saveUpload(file, transfer, parts, token)
     }
     controller.signal.throwIfAborted()
     const count = Math.ceil(file.size / transfer.part_size)
@@ -71,6 +74,7 @@ export function createMultipartAttempt(file: File, operations = defaultOperation
           const etag = await operations.uploadPart(url, body,
             bytes => progress(Math.min((offset + bytes) / file.size, 1)), controller.signal)
           parts.push({ number, etag })
+          saveUpload(file, transfer, parts, token)
           break
         } catch (error) {
           controller.signal.throwIfAborted()
@@ -90,7 +94,9 @@ export function createMultipartAttempt(file: File, operations = defaultOperation
     // be recovered using the same token and part manifest on the next send.
     finishing = true
     progress(1)
-    return operations.completeMultipartTransfer(transfer.id, passcode, token, parts)
+    const completed = await operations.completeMultipartTransfer(transfer.id, passcode, token, parts)
+    clearSavedUpload(transfer.id)
+    return completed
   }
 
   return {
@@ -105,7 +111,11 @@ export function createMultipartAttempt(file: File, operations = defaultOperation
       active = task
       try { return await task }
       catch (error) {
-        if (error instanceof ApiError && error.status === 410) { transfer = null; parts = [] }
+        if (error instanceof ApiError && error.status === 410) {
+          if (transfer) clearSavedUpload(transfer.id)
+          transfer = null
+          parts = []
+        }
         throw error
       }
       finally { active = null; finishing = false; onRetry(null) }
@@ -116,7 +126,10 @@ export function createMultipartAttempt(file: File, operations = defaultOperation
       controller.abort()
       try {
         await active?.catch(() => {})
-        if (transfer) await operations.cancelMultipartTransfer(transfer.id, passcode)
+        if (transfer) {
+          await operations.cancelMultipartTransfer(transfer.id, passcode)
+          clearSavedUpload(transfer.id)
+        }
         canceled = true
       } finally { canceling = false }
     },
