@@ -6,7 +6,7 @@ from typing import Annotated
 from uuid import uuid4
 
 from botocore.exceptions import BotoCoreError, ClientError
-from fastapi import Depends, FastAPI, HTTPException, Path, Response
+from fastapi import Depends, FastAPI, HTTPException, Path, Request, Response
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select, update
@@ -15,7 +15,8 @@ from sqlalchemy.orm import Session
 
 import storage
 from cleanup import cleanup_expired
-from db import MultipartUpload, Transfer, engine
+from db import Device, DeviceDelivery, MultipartUpload, Transfer, engine
+from devices import authorize_delivery, build_device_router, delivery_sender
 from storage import StorageNotConfigured, get_s3
 
 app = FastAPI()
@@ -137,6 +138,8 @@ def find_shared_transfer(session, token):
     )
     if transfer is None:
         raise HTTPException(status_code=404, detail="This link is invalid.")
+    if session.get(DeviceDelivery, transfer.id) is not None:
+        raise HTTPException(status_code=404, detail="This link is invalid.")
     if is_expired(transfer):
         raise HTTPException(status_code=410, detail="This link has expired.")
     return transfer
@@ -145,6 +148,64 @@ def find_shared_transfer(session, token):
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+
+DEVICE_COOKIE = "file_transfer_device"
+DEVICE_LIFETIME = timedelta(days=90)
+
+
+class DeviceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    name: str = Field(min_length=1, max_length=64, pattern=r"^[^\x00-\x1f\x7f]+$")
+
+
+def find_device(request, session):
+    token = request.cookies.get(DEVICE_COOKIE, "")
+    if len(token) != 64 or any(c not in "0123456789abcdef" for c in token):
+        return None
+    return session.scalar(select(Device).where(
+        Device.token_hash == hash_token(token),
+        Device.expires_at > datetime.now(timezone.utc),
+    ))
+
+
+@app.get("/api/devices/me")
+def current_device(request: Request, response: Response, session: Annotated[Session, Depends(get_db)]):
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        device = find_device(request, session)
+        return {"id": device.id, "name": device.name} if device else None
+    except SQLAlchemyError:
+        raise HTTPException(status_code=503, detail="Could not load this device. Try again later.") from None
+
+
+@app.post("/api/devices", dependencies=[Depends(require_passcode)])
+def remember_device(payload: DeviceRequest, request: Request, response: Response,
+                    session: Annotated[Session, Depends(get_db)]):
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        device = find_device(request, session)
+        token = request.cookies[DEVICE_COOKIE] if device else secrets.token_hex(32)
+        if device is None:
+            device = Device(token_hash=hash_token(token))
+            session.add(device)
+        device.name = payload.name
+        device.expires_at = datetime.now(timezone.utc) + DEVICE_LIFETIME
+        session.flush()
+        result = {"id": device.id, "name": device.name}
+        session.commit()
+    except SQLAlchemyError:
+        session.rollback()
+        raise HTTPException(status_code=503, detail="Could not remember this device. Try again later.") from None
+    response.set_cookie(
+        DEVICE_COOKIE, token, max_age=int(DEVICE_LIFETIME.total_seconds()),
+        httponly=True, secure=os.getenv("DEVICE_COOKIE_SECURE", "true").lower() != "false",
+        samesite="lax", path="/",
+    )
+    return result
+
+
+app.include_router(build_device_router(get_db, find_device))
 
 
 @app.get("/api/cron/cleanup", dependencies=[Depends(require_cron_secret)])
@@ -323,6 +384,7 @@ def download_shared_file(
 
 class MultipartRequest(TransferRequest):
     size_bytes: int = Field(strict=True, gt=0, le=storage.MAX_MULTIPART_SIZE)
+    recipient_id: str | None = Field(default=None, min_length=36, max_length=36)
 
 
 class MultipartCreated(TransferResponse):
@@ -361,6 +423,7 @@ def require_pending_upload(transfer):
           dependencies=[Depends(require_passcode)])
 def create_multipart_transfer(
     payload: MultipartRequest,
+    request: Request,
     session: Annotated[Session, Depends(get_db)],
     s3: Annotated[object, Depends(get_s3)],
 ):
@@ -372,8 +435,11 @@ def create_multipart_transfer(
     transfer.s3_key = storage.object_key(transfer.id)
     upload_id = None
     try:
+        sender = delivery_sender(request, session, payload.recipient_id, find_device) if payload.recipient_id else None
         session.add(transfer)
         session.flush()
+        if sender:
+            session.add(DeviceDelivery(transfer_id=transfer.id, sender_id=sender.id, recipient_id=payload.recipient_id))
         upload_id = storage.start_multipart(s3, transfer.s3_key)
         session.add(MultipartUpload(transfer_id=transfer.id, upload_id=upload_id))
         response = MultipartCreated(
@@ -398,11 +464,13 @@ def create_multipart_transfer(
           dependencies=[Depends(require_passcode)])
 def sign_upload_part(
     transfer_id: str, number: Annotated[int, Path(ge=1, le=64)],
+    request: Request,
     session: Annotated[Session, Depends(get_db)],
     s3: Annotated[object, Depends(get_s3)],
 ):
     try:
         transfer, upload = multipart_record(session, transfer_id)
+        authorize_delivery(request, session, transfer_id, find_device)
         require_pending_upload(transfer)
         size = min(storage.PART_SIZE, transfer.size_bytes - (number - 1) * storage.PART_SIZE)
         if size <= 0:
@@ -424,11 +492,13 @@ def sign_upload_part(
           response_model=CompletedTransferResponse, dependencies=[Depends(require_passcode)])
 def complete_multipart_transfer(
     transfer_id: str, payload: MultipartCompletion,
+    request: Request,
     session: Annotated[Session, Depends(get_db)],
     s3: Annotated[object, Depends(get_s3)],
 ):
     try:
         transfer, upload = multipart_record(session, transfer_id)
+        authorize_delivery(request, session, transfer_id, find_device)
         token_hash = hash_token(payload.share_token)
         if transfer.status == "ready" and secrets.compare_digest(transfer.share_token_hash or "", token_hash):
             if is_expired(transfer):
@@ -438,14 +508,16 @@ def complete_multipart_transfer(
         count = (transfer.size_bytes + storage.PART_SIZE - 1) // storage.PART_SIZE
         if [part.number for part in payload.parts] != list(range(1, count + 1)):
             raise HTTPException(status_code=422, detail="Include each file part once, in order.")
-        # A prior CompleteMultipartUpload may have succeeded before its response or
-        # database commit was lost. The unique key is never reused for another file.
+        # Check the upload first: HEAD on a missing object returns 403 when the
+        # app has object permissions but no bucket-list permission.
         try:
-            size = storage.uploaded_size(s3, transfer.s3_key)
-        except ClientError as error:
-            if error.response.get("Error", {}).get("Code") not in {"404", "NoSuchKey"}:
-                raise
             parts = storage.multipart_parts(s3, transfer.s3_key, upload.upload_id)
+        except ClientError as error:
+            if error.response.get("Error", {}).get("Code") != "NoSuchUpload":
+                raise
+            # Completion may have succeeded before its response or database
+            # commit was lost. This transfer's object key is never reused.
+        else:
             expected = [(part.number, part.etag,
                          min(storage.PART_SIZE, transfer.size_bytes - (part.number - 1) * storage.PART_SIZE))
                         for part in payload.parts]
@@ -454,7 +526,7 @@ def complete_multipart_transfer(
                 raise HTTPException(status_code=409, detail="Uploaded parts do not match the file. Retry the upload.")
             storage.finish_multipart(s3, transfer.s3_key, upload.upload_id,
                                      [{"PartNumber": p.number, "ETag": p.etag} for p in payload.parts])
-            size = storage.uploaded_size(s3, transfer.s3_key)
+        size = storage.uploaded_size(s3, transfer.s3_key)
         if size != transfer.size_bytes:
             raise HTTPException(status_code=409, detail="The uploaded file does not match the expected size.")
         if is_expired(transfer):
@@ -475,11 +547,13 @@ def complete_multipart_transfer(
 @app.delete("/api/multipart-transfers/{transfer_id}", dependencies=[Depends(require_passcode)])
 def cancel_multipart_transfer(
     transfer_id: str,
+    request: Request,
     session: Annotated[Session, Depends(get_db)],
     s3: Annotated[object, Depends(get_s3)],
 ):
     try:
         transfer, upload = multipart_record(session, transfer_id)
+        authorize_delivery(request, session, transfer_id, find_device, require_pair=False)
         if transfer.status == "ready":
             raise HTTPException(status_code=409, detail="This file is already shared.")
         # Repeat aborts safely, including after an interrupted cancellation.

@@ -2,18 +2,19 @@
 import { useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { MAX_FILE_SIZE } from '../api'
+import type { RememberedDevice } from '../api'
 import { createMultipartAttempt } from '../multipartAttempt'
 import type { UploadRetry } from '../multipartAttempt'
 import FileSummary from '../components/FileSummary'
 import TransferLayout from '../components/TransferLayout'
 import { ArrowRightIcon, CheckIcon, ClockIcon, CopyIcon, KeyIcon, UploadIcon } from '../components/icons'
 
-type Shared = { link: string; qrCode: string | null; expiresAt: string }
+type Shared = { link: string; qrCode: string | null; expiresAt: string; recipient?: string }
 function formatTime(iso: string) {
   return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 }
 
-function UploadPage() {
+function UploadPage({ peers }: { peers: RememberedDevice[] }) {
   const [file, setFile] = useState<File | null>(null)
   const [error, setError] = useState('')
   const [passcode, setPasscode] = useState('')
@@ -27,6 +28,7 @@ function UploadPage() {
   const [notice, setNotice] = useState('')
   const [hasAttempt, setHasAttempt] = useState(false)
   const [retry, setRetry] = useState<UploadRetry | null>(null)
+  const [recipient, setRecipient] = useState<RememberedDevice | null>(null)
   const busy = progress !== null || canceling
 
   async function copyLink(link: string) {
@@ -77,12 +79,12 @@ function UploadPage() {
     setDragging(false)
     setProgress(0)
     try {
-      attempt.current ??= createMultipartAttempt(file)
+      attempt.current ??= createMultipartAttempt(file, undefined, recipient?.id)
       setHasAttempt(true)
       const completed = await attempt.current.send(passcode, setProgress, setRetry)
       const link = `${window.location.origin}/d/${completed.share_token}`
-      const qrCode = await QRCode.toDataURL(link, { width: 416, margin: 4 }).catch(() => null)
-      setShared({ link, qrCode, expiresAt: completed.expires_at })
+      const qrCode = recipient ? null : await QRCode.toDataURL(link, { width: 416, margin: 4 }).catch(() => null)
+      setShared({ link, qrCode, expiresAt: completed.expires_at, recipient: recipient?.name })
       setPasscode('')
     } catch (error) {
       setRetryCompletion(attempt.current?.uploaded ?? false)
@@ -113,6 +115,14 @@ function UploadPage() {
   }
 
   if (shared) {
+    if (shared.recipient) return <TransferLayout title={`Sent to ${shared.recipient}`} step={2}>
+      <div className="field">
+        {file && <div className="file-box chosen"><FileSummary name={file.name} size={file.size} /></div>}
+        <p>Open this website on {shared.recipient} and expand Devices &amp; inbox to download the file.</p>
+        <p className="expires"><ClockIcon size={14} />Available until {formatTime(shared.expiresAt)}</p>
+        <div><button className="button primary" onClick={sendAnother}>Send another file</button></div>
+      </div>
+    </TransferLayout>
     return (
       <TransferLayout title="Ready to share" step={2}>
         {file && <div className="file-box chosen"><FileSummary name={file.name} size={file.size} /></div>}
@@ -145,6 +155,16 @@ function UploadPage() {
   return (
     <TransferLayout title={busy ? progress === 1 ? 'Finishing transfer' : 'Uploading file' : 'New transfer'} step={file ? 1 : 0}>
       <form className="upload-form" onSubmit={sendFile} aria-busy={busy}>
+        <div className="field">
+          <label htmlFor="recipient" className="field-label">Send to</label>
+          <select id="recipient" className="input" disabled={busy || hasAttempt} value={recipient?.id ?? ''}
+            onChange={event => setRecipient(peers.find(peer => peer.id === event.target.value) ?? null)}>
+            <option value="">Share link or QR code</option>
+            {peers.map(peer => <option key={peer.id} value={peer.id}>{peer.name}</option>)}
+            {recipient && !peers.some(peer => peer.id === recipient.id) && <option value={recipient.id} disabled>{recipient.name} (unavailable)</option>}
+          </select>
+          {!peers.length && <p className="muted small">Use Remember this device above to connect your phone or laptop.</p>}
+        </div>
         <div className={`field file-picker${dragging ? ' is-dragging' : ''}`}
           onDragOver={(event) => {
             event.preventDefault()

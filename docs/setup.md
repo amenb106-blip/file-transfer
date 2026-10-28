@@ -11,7 +11,20 @@ Copy [backend/.env.example](../backend/.env.example) to `backend/.env` and confi
 - `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, and `S3_BUCKET`.
 - `CRON_SECRET`: a separate random secret of at least 32 characters for cleanup.
 
-Run `.\.venv\Scripts\python.exe db.py` from `backend` after installing dependencies. It creates missing tables, including `multipart_uploads`, without altering existing transfer records. Check that `DATABASE_URL` points to the intended database first.
+Run `.\.venv\Scripts\python.exe db.py` from `backend` after installing dependencies. It creates missing tables, including `multipart_uploads`, `devices`, `device_pairs`, `pairing_invites`, and `device_deliveries`, without altering existing transfer records. Check that `DATABASE_URL` points to the intended database first.
+
+“Remember this device” requires the upload passcode and stores a 90-day HttpOnly, SameSite=Lax cookie. Only its token hash is stored in the database. Cookies are Secure by default; set `DEVICE_COOKIE_SECURE=false` only for local HTTP development, and omit it or set it to `true` on HTTPS deployments. Clearing cookies or letting the device identity expire requires registering and pairing again. Uploads still require the passcode.
+
+## Pair devices and receive files
+
+1. Remember each browser with a name such as “My laptop” or “My phone.”
+2. On the laptop, expand **Devices & inbox** and choose **Create pairing QR**. Scan it with the phone, or copy the pairing link to the other device.
+3. On the phone, choose **Request connection**. Approve the phone's name on the laptop. Invitations expire after 10 minutes and can be claimed by one device only.
+4. Choose the paired device under **Send to**, select a file, and upload. Open **Devices & inbox** on the recipient to download it. The inbox refreshes every 8 seconds while the page is open; files expire 10 minutes after upload completes.
+
+Pairing tokens stay in the link fragment and are submitted in request bodies; the database stores their hashes. Both devices must approve. Device-targeted files require the recipient's cookie and an active pairing; their generated share tokens cannot be used on public share endpoints. **Disconnect** removes the pairing and blocks further inbox downloads between those devices. Already-issued S3 download URLs can remain usable until their short expiry.
+
+Use the same HTTPS site on both devices. A QR generated from `localhost` points to the scanning device's own localhost, not the laptop. For local phone development, use an accessible LAN URL, serve Vite on that interface, permit that origin in S3 CORS, and use the local HTTP cookie setting. No background delivery or automatic saving to the device's filesystem is implemented; the recipient opens the website and presses Download.
 
 ## S3 permissions and CORS
 

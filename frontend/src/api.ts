@@ -28,7 +28,7 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response
   try {
     response = await fetch(path, init)
@@ -53,6 +53,20 @@ export function createTransfer(file: File, passcode: string) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Upload-Passcode': passcode },
     body: JSON.stringify({ filename: file.name, size_bytes: file.size }),
+  })
+}
+
+export type RememberedDevice = { id: string; name: string }
+
+export function getCurrentDevice(signal?: AbortSignal) {
+  return request<RememberedDevice | null>('/api/devices/me', { signal, cache: 'no-store' })
+}
+
+export function rememberDevice(name: string, passcode: string) {
+  return request<RememberedDevice>('/api/devices', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Upload-Passcode': passcode },
+    body: JSON.stringify({ name }),
   })
 }
 
@@ -107,11 +121,11 @@ export function formatSize(bytes: number) {
 export type MultipartTransfer = Omit<CreatedTransfer, 'upload'> & { part_size: number }
 export type UploadedPart = { number: number; etag: string }
 
-export function createMultipartTransfer(file: File, passcode: string) {
+export function createMultipartTransfer(file: File, passcode: string, recipientId?: string) {
   return request<MultipartTransfer>('/api/multipart-transfers', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Upload-Passcode': passcode },
-    body: JSON.stringify({ filename: file.name, size_bytes: file.size }),
+    body: JSON.stringify({ filename: file.name, size_bytes: file.size, recipient_id: recipientId }),
   })
 }
 

@@ -164,3 +164,21 @@ def test_legacy_completion_cannot_bypass_multipart_protocol(setup, s3):
     client, engine = setup
     transfer = create(client).json()
     assert client.post(f"/api/transfers/{transfer['id']}/complete", headers=HEADERS).status_code == 409
+
+
+def test_completion_does_not_require_permission_to_list_bucket(setup, s3, monkeypatch):
+    client, engine = setup
+    transfer = create(client).json()
+    parts = put_parts(s3, engine, transfer, [b"hello"])
+    original = s3.head_object
+
+    def head_without_list_permission(**kwargs):
+        try:
+            return original(**kwargs)
+        except ClientError as error:
+            if error.response["Error"]["Code"] == "404":
+                raise ClientError({"Error": {"Code": "403"}}, "HeadObject") from None
+            raise
+
+    monkeypatch.setattr(s3, "head_object", head_without_list_permission)
+    assert complete(client, transfer, parts).status_code == 200

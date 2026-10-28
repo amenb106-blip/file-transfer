@@ -510,6 +510,30 @@ progress::-moz-progress-bar {
   overflow-wrap: anywhere;
 }
 
+.device-panel {
+  width: 100%;
+  max-width: 1028px;
+  margin: 0 auto 22px;
+  padding: 14px 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow-wrap: anywhere;
+}
+
+.device-panel summary { cursor: pointer; padding: 10px 0; }
+.device-panel form { max-width: 400px; margin-top: 12px; }
+.device-panel .error { margin-top: 12px; }
+.device-heading { margin: 0; font-size: 16px; font-weight: 600; }
+.device-sections { display: grid; gap: 25px; padding: 14px 0; }
+.device-sections > section + section { border-top: 1px solid var(--border); padding-top: 20px; }
+.pairing-code { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; }
+.pairing-code img { max-width: 100%; height: auto; border-radius: 8px; }
+.pairing-code > .field { flex: 1 1 240px; min-width: 0; }
+.peer-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.inbox-item { display: grid; gap: 8px; }
+select.input { font: inherit; width: 100%; }
+
 @media (max-width: 760px) {
   .page {
     padding: 23px;

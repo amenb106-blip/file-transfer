@@ -1,6 +1,6 @@
 # File Transfer
 
-Share a file between devices with a temporary link or QR code. Files upload directly to AWS S3, while FastAPI handles permissions and sharing.
+Send files to your paired phone or laptop, or share a temporary link or QR code. Files upload directly to AWS S3, while FastAPI handles permissions and sharing.
 
 [Live demo](https://file-transfer-silk.vercel.app)
 
@@ -8,8 +8,9 @@ Share a file between devices with a temporary link or QR code. Files upload dire
 
 - Upload files up to **512 MiB** in chunks, with progress and cancellation.
 - Automatically retry failed chunks without resending completed ones.
+- Pair remembered devices with a QR code and send files to their private inboxes.
 - Share through a link or QR code that expires **10 minutes after upload**.
-- Require a passcode to upload; recipients only need the share link.
+- Require a passcode to upload; receive through a paired-device inbox or share link.
 - Clean up expired files and abandoned uploads.
 
 **In progress:** resuming an unfinished upload after refreshing the page.

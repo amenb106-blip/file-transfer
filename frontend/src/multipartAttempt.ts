@@ -33,7 +33,7 @@ function waitForRetry(delayMs: number, signal: AbortSignal) {
 
 // Keep confirmed parts and the completion token across retries in this tab.
 // Save checkpoints for the next stage: validating and restoring after a refresh.
-export function createMultipartAttempt(file: File, operations = defaultOperations) {
+export function createMultipartAttempt(file: File, operations = defaultOperations, recipientId?: string) {
   let transfer: MultipartTransfer | null = null
   let parts: UploadedPart[] = []
   let token = ''
@@ -52,7 +52,7 @@ export function createMultipartAttempt(file: File, operations = defaultOperation
     if (!transfer) {
       token = Array.from(crypto.getRandomValues(new Uint8Array(32)), b => b.toString(16).padStart(2, '0')).join('')
       // Do not abort creation: retain its ID so cancellation can clean it up.
-      transfer = await operations.createMultipartTransfer(file, passcode)
+      transfer = await operations.createMultipartTransfer(file, passcode, recipientId)
       saveUpload(file, transfer, parts, token)
     }
     controller.signal.throwIfAborted()

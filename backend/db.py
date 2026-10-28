@@ -58,6 +58,40 @@ class MultipartUpload(Base):
     upload_id = Column(String(1024), nullable=False)
 
 
+class Device(Base):
+    __tablename__ = "devices"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    name = Column(String(64), nullable=False)
+    token_hash = Column(String(64), unique=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False,
+                        default=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+
+
+class DevicePair(Base):
+    __tablename__ = "device_pairs"
+    device_a = Column(String(36), ForeignKey("devices.id"), primary_key=True)
+    device_b = Column(String(36), ForeignKey("devices.id"), primary_key=True)
+
+
+class PairingInvite(Base):
+    __tablename__ = "pairing_invites"
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    owner_id = Column(String(36), ForeignKey("devices.id"), nullable=False, index=True)
+    token_hash = Column(String(64), unique=True, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    claimant_id = Column(String(36), ForeignKey("devices.id"), nullable=True)
+    confirmed_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class DeviceDelivery(Base):
+    __tablename__ = "device_deliveries"
+    transfer_id = Column(String(36), ForeignKey("transfers.id"), primary_key=True)
+    sender_id = Column(String(36), ForeignKey("devices.id"), nullable=False)
+    recipient_id = Column(String(36), ForeignKey("devices.id"), nullable=False, index=True)
+
+
 if __name__ == "__main__":
     Base.metadata.create_all(engine)
     print("Transfer table ready!")

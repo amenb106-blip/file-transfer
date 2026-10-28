@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import delete, select
 from botocore.exceptions import BotoCoreError, ClientError
 
-from db import MultipartUpload, Transfer
+from db import DeviceDelivery, MultipartUpload, PairingInvite, Transfer
 from storage import abort_multipart, bucket_name
 
 # Allow time for in-flight uploads/downloads to finish after link expiration.
@@ -45,9 +45,12 @@ def cleanup_expired(session, s3):
     # Delete objects first. On a database failure the next run safely deletes the
     # already-missing objects again; S3 failures keep their records for retries.
     if deleted_ids:
+        session.execute(delete(DeviceDelivery).where(DeviceDelivery.transfer_id.in_(deleted_ids)))
         session.execute(delete(MultipartUpload).where(MultipartUpload.transfer_id.in_(deleted_ids)))
         session.execute(delete(Transfer).where(Transfer.id.in_(deleted_ids)))
         session.commit()
+    session.execute(delete(PairingInvite).where(PairingInvite.expires_at <= datetime.now(timezone.utc)))
+    session.commit()
     remaining = session.scalar(
         select(Transfer.id).where(Transfer.expires_at <= cutoff).limit(1)
     ) is not None
