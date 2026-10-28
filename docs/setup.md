@@ -17,10 +17,10 @@ Run `.\.venv\Scripts\python.exe db.py` from `backend` after installing dependenc
 
 ## Pair devices and receive files
 
-1. Remember each browser with a name such as “My laptop” or “My phone.”
-2. On the laptop, expand **Devices & inbox** and choose **Create pairing QR**. Scan it with the phone, or copy the pairing link to the other device.
+1. Choose **Connect a device** and save each browser with a name such as “My laptop” or “My phone.”
+2. On the laptop, choose **Connect a device** and choose **Create pairing QR**. Scan it with the phone, or copy the pairing link to the other device.
 3. On the phone, choose **Request connection**. Approve the phone's name on the laptop. Invitations expire after 10 minutes and can be claimed by one device only.
-4. Choose the paired device under **Send to**, select a file, and upload. Open **Devices & inbox** on the recipient to download it. The inbox refreshes every 8 seconds while the page is open; files expire 10 minutes after upload completes.
+4. Choose the paired device under **Send to**, select a file, and upload. Choose **Receive files** on the recipient to download it. The inbox refreshes every 8 seconds while the page is open; files expire 10 minutes after upload completes.
 
 Pairing tokens stay in the link fragment and are submitted in request bodies; the database stores their hashes. Both devices must approve. Device-targeted files require the recipient's cookie and an active pairing; their generated share tokens cannot be used on public share endpoints. **Disconnect** removes the pairing and blocks further inbox downloads between those devices. Already-issued S3 download URLs can remain usable until their short expiry.
 

@@ -1,13 +1,13 @@
 import type { ReactNode } from 'react'
 import { CheckIcon } from './icons'
 
-const steps = ['Choose file', 'Send file', 'Share link']
-
-function TransferLayout({ title, step, children }: {
+function TransferLayout({ title, step, children, deviceTransfer = false }: {
   title: string
   step?: 0 | 1 | 2
   children: ReactNode
+  deviceTransfer?: boolean
 }) {
+  const steps = ['Choose file', 'Send file', deviceTransfer ? 'Delivered' : 'Share link']
   return (
     <main className={`workspace${step === undefined ? ' workspace-simple' : ''}`}>
       {step !== undefined && (

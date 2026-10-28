@@ -42,7 +42,7 @@ export default function DeviceInbox({ deviceId }: { deviceId: string }) {
 
   const activeFiles = files.filter(file => Date.parse(file.expires_at) > now)
   return <section className="field" aria-label="Incoming files">
-    <h2 className="device-heading">Inbox <span className="muted small">({activeFiles.length})</span></h2>
+    <h2 className="device-heading" aria-live="polite">Receive files <span className="muted small">({activeFiles.length})</span></h2>
     <p className="muted small">Files from your paired devices appear here automatically. Download within 10 minutes of upload.</p>
     {loading ? <p role="status">Loading inbox…</p> : !activeFiles.length && <p className="muted small">No incoming files yet.</p>}
     {activeFiles.map(file => <div className="inbox-item" key={file.id}>

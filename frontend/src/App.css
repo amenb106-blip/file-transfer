@@ -677,3 +677,8 @@ select.input { font: inherit; width: 100%; }
     min-height: 44px;
   }
 }
+
+.transfer-navigation { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 22px; }
+.transfer-navigation a { text-decoration: none; }
+.receive-section { border-top: 1px solid var(--border); margin-top: 24px; padding-top: 24px; }
+#send, #receive, #connect { scroll-margin-top: 24px; }

@@ -16,8 +16,13 @@ function App() {
       <Header />
       {match ? <DownloadPage token={match[1]} /> : <>
         {pairingPage && !pairToken && <p className="error" role="alert">This pairing link is incomplete. Scan a new QR code from your other device.</p>}
+        {!pairingPage && <nav className="transfer-navigation" aria-label="File transfer actions">
+          <a className="button primary" href="#send">Send file</a>
+          <a className="button secondary" href="#receive">Receive files</a>
+          <a className="button secondary" href="#connect">Connect a device</a>
+        </nav>}
         <DevicePanel onPeers={setPeers} pairToken={pairToken} />
-        {!pairingPage && <UploadPage peers={peers} />}
+        {!pairingPage && <div id="send"><UploadPage peers={peers} /></div>}
       </>}
     </div>
   )

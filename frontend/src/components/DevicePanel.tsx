@@ -71,10 +71,13 @@ export default function DevicePanel({ onPeers, pairToken }: {
     } finally { setSaving(false) }
   }
 
-  return <section className="device-panel" aria-label="This device">
+  return <section className="device-panel" aria-label="Your devices and incoming files">
+    <div id="connect">
+    <h2 className="device-heading">Connect a device</h2>
+    <p className="muted small">Connect once, then choose your phone or laptop under Send to whenever you send a file.</p>
     {loading ? <p className="muted small" role="status">Checking this device…</p>
-      : device ? <details open={!!pairToken}>
-        <summary>This device: <strong>{device.name}</strong> · Devices &amp; inbox</summary>
+      : device ? <div>
+        <p>This device: <strong>{device.name}</strong></p>
         <div className="device-sections">
           <PairDevices token={pairToken} onConnected={connected} />
           <section className="field" aria-label="Paired devices">
@@ -90,11 +93,9 @@ export default function DevicePanel({ onPeers, pairToken }: {
             </div>)}
             {peerError && <p className="error" role="alert">{peerError}</p>}
           </section>
-          <DeviceInbox deviceId={device.id} />
         </div>
-      </details>
-      : <details open={!!pairToken}>
-        <summary>Remember this device</summary>
+      </div>
+      : <div>
         <form className="field" onSubmit={save} aria-busy={saving}>
           <p className="muted small">{pairToken ? 'Name this browser and enter your upload passcode to continue pairing.' : 'Save this browser to pair your devices and receive files here.'}</p>
           <label className="field" htmlFor="device-name"><span className="field-label">Device name</span>
@@ -109,7 +110,14 @@ export default function DevicePanel({ onPeers, pairToken }: {
             {saving ? 'Saving…' : 'Save device'}
           </button></div>
         </form>
-      </details>}
+      </div>}
     {error && <p role="alert" className="error">{error}</p>}
+    </div>
+    <div id="receive" className="receive-section">
+      {device ? <DeviceInbox deviceId={device.id} /> : <>
+        <h2 className="device-heading">Receive files</h2>
+        <p className="muted small">Save this device above and connect your other device. Incoming files will appear here.</p>
+      </>}
+    </div>
   </section>
 }

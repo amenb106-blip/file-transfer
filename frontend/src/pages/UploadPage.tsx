@@ -115,10 +115,10 @@ function UploadPage({ peers }: { peers: RememberedDevice[] }) {
   }
 
   if (shared) {
-    if (shared.recipient) return <TransferLayout title={`Sent to ${shared.recipient}`} step={2}>
+    if (shared.recipient) return <TransferLayout title={`Sent to ${shared.recipient}`} step={2} deviceTransfer>
       <div className="field">
         {file && <div className="file-box chosen"><FileSummary name={file.name} size={file.size} /></div>}
-        <p>Open this website on {shared.recipient} and expand Devices &amp; inbox to download the file.</p>
+        <p>Open this website on {shared.recipient} and choose Receive files to download the file.</p>
         <p className="expires"><ClockIcon size={14} />Available until {formatTime(shared.expiresAt)}</p>
         <div><button className="button primary" onClick={sendAnother}>Send another file</button></div>
       </div>
@@ -153,7 +153,7 @@ function UploadPage({ peers }: { peers: RememberedDevice[] }) {
   }
 
   return (
-    <TransferLayout title={busy ? progress === 1 ? 'Finishing transfer' : 'Uploading file' : 'New transfer'} step={file ? 1 : 0}>
+    <TransferLayout title={busy ? progress === 1 ? 'Finishing transfer' : 'Uploading file' : 'New transfer'} step={file ? 1 : 0} deviceTransfer={!!recipient}>
       <form className="upload-form" onSubmit={sendFile} aria-busy={busy}>
         <div className="field">
           <label htmlFor="recipient" className="field-label">Send to</label>
@@ -163,7 +163,7 @@ function UploadPage({ peers }: { peers: RememberedDevice[] }) {
             {peers.map(peer => <option key={peer.id} value={peer.id}>{peer.name}</option>)}
             {recipient && !peers.some(peer => peer.id === recipient.id) && <option value={recipient.id} disabled>{recipient.name} (unavailable)</option>}
           </select>
-          {!peers.length && <p className="muted small">Use Remember this device above to connect your phone or laptop.</p>}
+          {!peers.length && <p className="muted small">Choose Connect a device above to pair your phone or laptop.</p>}
         </div>
         <div className={`field file-picker${dragging ? ' is-dragging' : ''}`}
           onDragOver={(event) => {
