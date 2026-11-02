@@ -10,7 +10,7 @@ Send files to your paired phone or laptop, or share a temporary link or QR code.
 - Automatically retry failed chunks without resending completed ones.
 - Pair remembered devices with a QR code and send files to their private inboxes.
 - Share through a link or QR code that expires **10 minutes after upload**.
-- Require a passcode to upload; receive through a paired-device inbox or share link.
+- Send to paired devices without re-entering a passcode; public share-link uploads require one.
 - Clean up expired files and abandoned uploads.
 
 **In progress:** resuming an unfinished upload after refreshing the page.

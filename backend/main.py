@@ -419,8 +419,22 @@ def require_pending_upload(transfer):
         raise HTTPException(status_code=410, detail="This upload has expired. Start again.")
 
 
-@app.post("/api/multipart-transfers", status_code=201, response_model=MultipartCreated,
-          dependencies=[Depends(require_passcode)])
+def require_device_upload_request(request):
+    # Cookie-based requests need a custom header to block cross-origin forms.
+    # Existing clients may instead supply their valid upload passcode.
+    if request.headers.get("X-Device-Action") != "1":
+        require_passcode(request.headers.get("X-Upload-Passcode"))
+
+
+def authorize_multipart_request(request, session, transfer_id, require_pair=True):
+    delivery = authorize_delivery(request, session, transfer_id, find_device, require_pair=require_pair)
+    if delivery:
+        require_device_upload_request(request)
+    else:
+        require_passcode(request.headers.get("X-Upload-Passcode"))
+
+
+@app.post("/api/multipart-transfers", status_code=201, response_model=MultipartCreated)
 def create_multipart_transfer(
     payload: MultipartRequest,
     request: Request,
@@ -435,7 +449,12 @@ def create_multipart_transfer(
     transfer.s3_key = storage.object_key(transfer.id)
     upload_id = None
     try:
-        sender = delivery_sender(request, session, payload.recipient_id, find_device) if payload.recipient_id else None
+        if payload.recipient_id:
+            require_device_upload_request(request)
+            sender = delivery_sender(request, session, payload.recipient_id, find_device)
+        else:
+            require_passcode(request.headers.get("X-Upload-Passcode"))
+            sender = None
         session.add(transfer)
         session.flush()
         if sender:
@@ -460,8 +479,7 @@ def create_multipart_transfer(
         raise storage_unavailable() from None
 
 
-@app.post("/api/multipart-transfers/{transfer_id}/parts/{number}",
-          dependencies=[Depends(require_passcode)])
+@app.post("/api/multipart-transfers/{transfer_id}/parts/{number}")
 def sign_upload_part(
     transfer_id: str, number: Annotated[int, Path(ge=1, le=64)],
     request: Request,
@@ -470,7 +488,7 @@ def sign_upload_part(
 ):
     try:
         transfer, upload = multipart_record(session, transfer_id)
-        authorize_delivery(request, session, transfer_id, find_device)
+        authorize_multipart_request(request, session, transfer_id)
         require_pending_upload(transfer)
         size = min(storage.PART_SIZE, transfer.size_bytes - (number - 1) * storage.PART_SIZE)
         if size <= 0:
@@ -489,7 +507,7 @@ def sign_upload_part(
 
 
 @app.post("/api/multipart-transfers/{transfer_id}/complete",
-          response_model=CompletedTransferResponse, dependencies=[Depends(require_passcode)])
+          response_model=CompletedTransferResponse)
 def complete_multipart_transfer(
     transfer_id: str, payload: MultipartCompletion,
     request: Request,
@@ -498,7 +516,7 @@ def complete_multipart_transfer(
 ):
     try:
         transfer, upload = multipart_record(session, transfer_id)
-        authorize_delivery(request, session, transfer_id, find_device)
+        authorize_multipart_request(request, session, transfer_id)
         token_hash = hash_token(payload.share_token)
         if transfer.status == "ready" and secrets.compare_digest(transfer.share_token_hash or "", token_hash):
             if is_expired(transfer):
@@ -544,7 +562,7 @@ def complete_multipart_transfer(
         raise database_unavailable() from None
 
 
-@app.delete("/api/multipart-transfers/{transfer_id}", dependencies=[Depends(require_passcode)])
+@app.delete("/api/multipart-transfers/{transfer_id}")
 def cancel_multipart_transfer(
     transfer_id: str,
     request: Request,
@@ -553,7 +571,7 @@ def cancel_multipart_transfer(
 ):
     try:
         transfer, upload = multipart_record(session, transfer_id)
-        authorize_delivery(request, session, transfer_id, find_device, require_pair=False)
+        authorize_multipart_request(request, session, transfer_id, require_pair=False)
         if transfer.status == "ready":
             raise HTTPException(status_code=409, detail="This file is already shared.")
         # Repeat aborts safely, including after an interrupted cancellation.

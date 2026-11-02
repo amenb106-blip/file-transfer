@@ -55,7 +55,7 @@ def test_private_delivery_is_only_available_to_paired_recipient(setup, s3):
     phone, phone_info = device("Phone")
     stranger, _ = device("Stranger")
     invite = connect(laptop, phone)
-    response = laptop.post("/api/multipart-transfers", headers=HEADERS,
+    response = laptop.post("/api/multipart-transfers", headers=ACTION,
                            json={"filename": "hello.txt", "size_bytes": 5, "recipient_id": phone_info["id"]})
     assert response.status_code == 201, response.text
     transfer = response.json()
@@ -63,8 +63,8 @@ def test_private_delivery_is_only_available_to_paired_recipient(setup, s3):
     parts = put_parts(s3, engine, transfer, [b"hello"])
     path = f"/api/multipart-transfers/{transfer['id']}/complete"
     body = {"share_token": TOKEN, "parts": parts}
-    assert stranger.post(path, headers=HEADERS, json=body).status_code == 403
-    assert laptop.post(path, headers=HEADERS, json=body).status_code == 200
+    assert stranger.post(path, headers=ACTION, json=body).status_code == 403
+    assert laptop.post(path, headers=ACTION, json=body).status_code == 200
     inbox = phone.get("/api/inbox")
     assert inbox.status_code == 200, inbox.text
     assert inbox.json()[0]["sender_name"] == "Laptop"
@@ -93,3 +93,41 @@ def test_missing_auth_csrf_and_expired_invites(setup):
         session.get(PairingInvite, invite["id"]).expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
         session.commit()
     assert phone.post("/api/pairings/claim", headers=ACTION, json={"token": invite["token"]}).status_code == 410
+
+
+def test_paired_upload_auth_and_revocation(setup, s3):
+    from db import Device
+    client, engine = setup
+    sender, sender_info = device("Sender")
+    recipient, recipient_info = device("Recipient")
+    stranger, _ = device("Stranger")
+    connect(sender, recipient)
+    body = {"filename": "private.txt", "size_bytes": 5, "recipient_id": recipient_info["id"]}
+    base = "/api/multipart-transfers"
+    assert client.post(base, headers=ACTION, json=body).status_code == 401
+    assert stranger.post(base, headers=ACTION, json=body).status_code == 403
+    assert sender.post(base, json=body).status_code == 401
+    assert sender.post(base, headers=ACTION, json={"filename": "public.txt", "size_bytes": 5}).status_code == 401
+    transfer = sender.post(base, headers=ACTION, json=body).json()
+    path = base + "/" + transfer["id"]
+    assert sender.post(path + "/parts/1", headers=ACTION).status_code == 200
+    assert sender.post(path + "/parts/1").status_code == 401
+    assert stranger.post(path + "/parts/1", headers={**ACTION, **HEADERS}).status_code == 403
+    assert recipient.delete(path, headers=ACTION).status_code == 403
+    parts = put_parts(s3, engine, transfer, [b"hello"])
+    with Session(engine) as session:
+        session.get(Device, sender_info["id"]).expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        session.commit()
+    assert sender.post(path + "/parts/1", headers=ACTION).status_code == 403
+    with Session(engine) as session:
+        session.get(Device, sender_info["id"]).expires_at = datetime.now(timezone.utc) + timedelta(days=1)
+        session.commit()
+    assert sender.delete("/api/devices/peers/" + recipient_info["id"], headers=ACTION).status_code == 200
+    assert sender.post(path + "/parts/1", headers=ACTION).status_code == 403
+    assert sender.post(path + "/complete", headers=ACTION, json={"share_token": TOKEN, "parts": parts}).status_code == 403
+    assert sender.delete(path, headers=ACTION).status_code == 200
+    public = sender.post(base, headers=HEADERS, json={"filename": "public.txt", "size_bytes": 5}).json()
+    path = base + "/" + public["id"]
+    assert sender.post(path + "/parts/1", headers=ACTION).status_code == 401
+    assert sender.post(path + "/complete", headers=ACTION, json={"share_token": TOKEN, "parts": parts}).status_code == 401
+    assert sender.delete(path, headers=ACTION).status_code == 401

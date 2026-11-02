@@ -73,7 +73,7 @@ function UploadPage({ peers }: { peers: RememberedDevice[] }) {
 
   async function sendFile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!file || !passcode || busy) return
+    if (!file || (!recipient && !passcode) || busy) return
     setError('')
     setNotice('')
     setDragging(false)
@@ -81,7 +81,7 @@ function UploadPage({ peers }: { peers: RememberedDevice[] }) {
     try {
       attempt.current ??= createMultipartAttempt(file, undefined, recipient?.id)
       setHasAttempt(true)
-      const completed = await attempt.current.send(passcode, setProgress, setRetry)
+      const completed = await attempt.current.send(recipient ? '' : passcode, setProgress, setRetry)
       const link = `${window.location.origin}/d/${completed.share_token}`
       const qrCode = recipient ? null : await QRCode.toDataURL(link, { width: 416, margin: 4 }).catch(() => null)
       setShared({ link, qrCode, expiresAt: completed.expires_at, recipient: recipient?.name })
@@ -101,7 +101,7 @@ function UploadPage({ peers }: { peers: RememberedDevice[] }) {
     setCanceling(true)
     setError('')
     try {
-      await attempt.current.cancel(passcode)
+      await attempt.current.cancel(recipient ? '' : passcode)
       attempt.current = null
       setHasAttempt(false)
       setRetryCompletion(false)
@@ -194,20 +194,20 @@ function UploadPage({ peers }: { peers: RememberedDevice[] }) {
         {progress !== null ? <div className="progress">
           <div className="progress-label"><span role="status">{retry
             ? `Connection interrupted. Retrying part ${retry.part} shortly (${retry.attempt}/${retry.maxRetries})…`
-            : progress === 1 ? 'Preparing share link…' : 'Uploading…'}</span><span className="mono">{Math.round(progress * 100)}%</span></div>
+            : progress === 1 ? (recipient ? 'Delivering file…' : 'Preparing share link…') : 'Uploading…'}</span><span className="mono">{Math.round(progress * 100)}%</span></div>
           <progress value={progress} max={1} aria-label="Upload progress" />
-        </div> : <div className="field">
+        </div> : !recipient ? <div className="field">
           <label htmlFor="passcode" className="field-label">Upload passcode</label>
           <div className="input-wrap"><KeyIcon size={17} />
             <input id="passcode" type="password" autoComplete="current-password" spellCheck={false}
               value={passcode} onChange={(event) => setPasscode(event.target.value)} required />
           </div>
-        </div>}
+        </div> : <p className="muted small">Your paired device is verified. No passcode needed.</p>}
         <div className="send-actions">
           <p className="expires"><ClockIcon size={14} />Links last 10 minutes after upload.</p>
           {hasAttempt && progress !== 1 && <button type="button" className="button secondary"
             onClick={cancelUpload} disabled={canceling}>{canceling ? 'Canceling…' : 'Cancel upload'}</button>}
-          <button type="submit" className="button primary" disabled={!file || !passcode || busy}>
+          <button type="submit" className="button primary" disabled={!file || (!recipient && !passcode) || busy}>
             {busy ? 'Sending…' : retryCompletion ? 'Retry sharing' : 'Send file'}<ArrowRightIcon size={17} />
           </button>
         </div>

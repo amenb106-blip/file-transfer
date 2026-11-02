@@ -46,6 +46,7 @@ def authorize_delivery(request, session, transfer_id, find_device, require_pair=
             raise HTTPException(403, "This upload belongs to another device.")
         if require_pair:
             delivery_sender(request, session, delivery.recipient_id, find_device)
+    return delivery
 
 
 class PairToken(BaseModel):

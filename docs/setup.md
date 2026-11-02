@@ -7,13 +7,13 @@
 Copy [backend/.env.example](../backend/.env.example) to `backend/.env` and configure:
 
 - `DATABASE_URL`: PostgreSQL connection string.
-- `UPLOAD_PASSCODE`: required to create and manage uploads.
+- `UPLOAD_PASSCODE`: required to save a device and create or manage public share-link uploads.
 - `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, and `S3_BUCKET`.
 - `CRON_SECRET`: a separate random secret of at least 32 characters for cleanup.
 
 Run `.\.venv\Scripts\python.exe db.py` from `backend` after installing dependencies. It creates missing tables, including `multipart_uploads`, `devices`, `device_pairs`, `pairing_invites`, and `device_deliveries`, without altering existing transfer records. Check that `DATABASE_URL` points to the intended database first.
 
-“Remember this device” requires the upload passcode and stores a 90-day HttpOnly, SameSite=Lax cookie. Only its token hash is stored in the database. Cookies are Secure by default; set `DEVICE_COOKIE_SECURE=false` only for local HTTP development, and omit it or set it to `true` on HTTPS deployments. Clearing cookies or letting the device identity expire requires registering and pairing again. Uploads still require the passcode.
+“Remember this device” requires the upload passcode and stores a 90-day HttpOnly, SameSite=Lax cookie. Only its token hash is stored in the database. Cookies are Secure by default; set `DEVICE_COOKIE_SECURE=false` only for local HTTP development, and omit it or set it to `true` on HTTPS deployments. Clearing cookies or letting the device identity expire requires registering and pairing again. Public share-link uploads still require the passcode. Transfers to paired devices use the sender's saved identity and active pairing instead; their requests include `X-Device-Action: 1`. The original sender can cancel an unfinished upload after disconnecting.
 
 ## Pair devices and receive files
 

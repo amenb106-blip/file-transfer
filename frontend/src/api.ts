@@ -124,28 +124,28 @@ export type UploadedPart = { number: number; etag: string }
 export function createMultipartTransfer(file: File, passcode: string, recipientId?: string) {
   return request<MultipartTransfer>('/api/multipart-transfers', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Upload-Passcode': passcode },
+    headers: { 'Content-Type': 'application/json', 'X-Device-Action': '1', ...(passcode ? { 'X-Upload-Passcode': passcode } : {}) },
     body: JSON.stringify({ filename: file.name, size_bytes: file.size, recipient_id: recipientId }),
   })
 }
 
 export function getPartUrl(id: string, number: number, passcode: string, signal?: AbortSignal) {
   return request<{ url: string }>(`/api/multipart-transfers/${encodeURIComponent(id)}/parts/${number}`, {
-    method: 'POST', headers: { 'X-Upload-Passcode': passcode }, signal,
+    method: 'POST', headers: { 'X-Device-Action': '1', ...(passcode ? { 'X-Upload-Passcode': passcode } : {}) }, signal,
   })
 }
 
 export function completeMultipartTransfer(id: string, passcode: string, shareToken: string, parts: UploadedPart[]) {
   return request<CompletedTransfer>(`/api/multipart-transfers/${encodeURIComponent(id)}/complete`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Upload-Passcode': passcode },
+    headers: { 'Content-Type': 'application/json', 'X-Device-Action': '1', ...(passcode ? { 'X-Upload-Passcode': passcode } : {}) },
     body: JSON.stringify({ share_token: shareToken, parts }),
   })
 }
 
 export function cancelMultipartTransfer(id: string, passcode: string) {
   return request<{ status: string }>(`/api/multipart-transfers/${encodeURIComponent(id)}`, {
-    method: 'DELETE', headers: { 'X-Upload-Passcode': passcode },
+    method: 'DELETE', headers: { 'X-Device-Action': '1', ...(passcode ? { 'X-Upload-Passcode': passcode } : {}) },
   })
 }
 
