@@ -5,7 +5,7 @@ import type { InboxFile } from '../deviceApi'
 import FileSummary from './FileSummary'
 import { minutesLeft } from '../expiration'
 
-export default function DeviceInbox({ deviceId }: { deviceId: string }) {
+export default function DeviceInbox({ deviceId, onCount }: { deviceId: string; onCount: (count: number) => void }) {
   const [files, setFiles] = useState<InboxFile[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -41,6 +41,7 @@ export default function DeviceInbox({ deviceId }: { deviceId: string }) {
   }
 
   const activeFiles = files.filter(file => Date.parse(file.expires_at) > now)
+  useEffect(() => { onCount(activeFiles.length) }, [activeFiles.length, onCount])
   return <section className="field" aria-label="Incoming files">
     <h2 className="device-heading" aria-live="polite">Receive files <span className="muted small">({activeFiles.length})</span></h2>
     <p className="muted small">Files from your paired devices appear here automatically. Download within 10 minutes of upload.</p>

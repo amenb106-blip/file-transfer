@@ -9,7 +9,7 @@ function TransferLayout({ title, step, children, deviceTransfer = false }: {
 }) {
   const steps = ['Choose file', 'Send file', deviceTransfer ? 'Delivered' : 'Share link']
   return (
-    <main className={`workspace${step === undefined ? ' workspace-simple' : ''}`}>
+    <main className="workspace workspace-simple workspace-focused">
       {step !== undefined && (
         <aside className="transfer-sidebar" aria-label="Transfer progress">
           <h2>Transfer</h2>

@@ -6,8 +6,10 @@ import { disconnectDevice, getPeers, problemMessage } from '../deviceApi'
 import PairDevices from './PairDevices'
 import DeviceInbox from './DeviceInbox'
 
-export default function DevicePanel({ onPeers, pairToken }: {
+export default function DevicePanel({ onPeers, pairToken, view, onCount, onDevice, onConnect }: {
   onPeers: (peers: RememberedDevice[]) => void; pairToken: string | null
+  view: 'send' | 'receive' | 'connect'; onCount: (count: number) => void
+  onDevice: (device: RememberedDevice | null) => void; onConnect: () => void
 }) {
   const [device, setDevice] = useState<RememberedDevice | null>(null)
   const [name, setName] = useState('')
@@ -17,6 +19,11 @@ export default function DevicePanel({ onPeers, pairToken }: {
   const [error, setError] = useState('')
   const [peers, setPeers] = useState<RememberedDevice[]>([])
   const [peerError, setPeerError] = useState('')
+
+  useEffect(() => {
+    onDevice(device)
+    if (!device) onCount(0)
+  }, [device, onDevice, onCount])
 
   const refreshPeers = useCallback(async (signal?: AbortSignal) => {
     if (!device) return
@@ -71,8 +78,8 @@ export default function DevicePanel({ onPeers, pairToken }: {
     } finally { setSaving(false) }
   }
 
-  return <section className="device-panel" aria-label="Your devices and incoming files">
-    <div id="connect">
+  return <section className="device-panel" aria-label="Your devices and incoming files" hidden={view === 'send'}>
+    <div id="connect" hidden={view !== 'connect'}>
     <h2 className="device-heading">Connect a device</h2>
     <p className="muted small">Connect once, then choose your phone or laptop under Send to whenever you send a file.</p>
     {loading ? <p className="muted small" role="status">Checking this device…</p>
@@ -80,8 +87,8 @@ export default function DevicePanel({ onPeers, pairToken }: {
         <p>This device: <strong>{device.name}</strong></p>
         <div className="device-sections">
           <PairDevices token={pairToken} onConnected={connected} />
-          <section className="field" aria-label="Paired devices">
-            <h2 className="device-heading">My devices</h2>
+          <details className="connected-settings">
+            <summary>Connected devices ({peers.length})</summary>
             {!peers.length && <p className="muted small">Pair your phone or laptop to send files directly.</p>}
             {peers.map(peer => <div className="peer-row" key={peer.id}><span>{peer.name}</span>
               <button className="button secondary" disabled={saving} onClick={async () => {
@@ -92,7 +99,7 @@ export default function DevicePanel({ onPeers, pairToken }: {
               }}>Disconnect</button>
             </div>)}
             {peerError && <p className="error" role="alert">{peerError}</p>}
-          </section>
+          </details>
         </div>
       </div>
       : <div>
@@ -113,10 +120,11 @@ export default function DevicePanel({ onPeers, pairToken }: {
       </div>}
     {error && <p role="alert" className="error">{error}</p>}
     </div>
-    <div id="receive" className="receive-section">
-      {device ? <DeviceInbox deviceId={device.id} /> : <>
+    <div id="receive" hidden={view !== 'receive'}>
+      {device ? <DeviceInbox key={device.id} deviceId={device.id} onCount={onCount} /> : <>
         <h2 className="device-heading">Receive files</h2>
-        <p className="muted small">Save this device above and connect your other device. Incoming files will appear here.</p>
+        <p className="muted small">Save this device and connect your phone or laptop. Files sent here will appear automatically.</p>
+        <button type="button" className="button primary" onClick={onConnect}>Connect a device</button>
       </>}
     </div>
   </section>

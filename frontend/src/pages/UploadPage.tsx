@@ -14,7 +14,9 @@ function formatTime(iso: string) {
   return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 }
 
-function UploadPage({ peers }: { peers: RememberedDevice[] }) {
+function UploadPage({ peers, onConnect, onReceive }: {
+  peers: RememberedDevice[]; onConnect: () => void; onReceive: () => void
+}) {
   const [file, setFile] = useState<File | null>(null)
   const [error, setError] = useState('')
   const [passcode, setPasscode] = useState('')
@@ -120,7 +122,8 @@ function UploadPage({ peers }: { peers: RememberedDevice[] }) {
         {file && <div className="file-box chosen"><FileSummary name={file.name} size={file.size} /></div>}
         <p>Open this website on {shared.recipient} and choose Receive files to download the file.</p>
         <p className="expires"><ClockIcon size={14} />Available until {formatTime(shared.expiresAt)}</p>
-        <div><button className="button primary" onClick={sendAnother}>Send another file</button></div>
+        <div className="actions"><button className="button primary" onClick={sendAnother}>Send another file</button>
+          <button className="button secondary" onClick={onReceive}>My incoming files</button></div>
       </div>
     </TransferLayout>
     return (
@@ -153,17 +156,21 @@ function UploadPage({ peers }: { peers: RememberedDevice[] }) {
   }
 
   return (
-    <TransferLayout title={busy ? progress === 1 ? 'Finishing transfer' : 'Uploading file' : 'New transfer'} step={file ? 1 : 0} deviceTransfer={!!recipient}>
+    <TransferLayout title={busy ? progress === 1 ? 'Finishing transfer' : 'Uploading file' : 'Send a file'} step={file ? 1 : 0} deviceTransfer={!!recipient}>
       <form className="upload-form" onSubmit={sendFile} aria-busy={busy}>
         <div className="field">
-          <label htmlFor="recipient" className="field-label">Send to</label>
-          <select id="recipient" className="input" disabled={busy || hasAttempt} value={recipient?.id ?? ''}
-            onChange={event => setRecipient(peers.find(peer => peer.id === event.target.value) ?? null)}>
-            <option value="">Share link or QR code</option>
-            {peers.map(peer => <option key={peer.id} value={peer.id}>{peer.name}</option>)}
-            {recipient && !peers.some(peer => peer.id === recipient.id) && <option value={recipient.id} disabled>{recipient.name} (unavailable)</option>}
-          </select>
-          {!peers.length && <p className="muted small">Choose Connect a device above to pair your phone or laptop.</p>}
+          <span id="destination-label" className="field-label">Send to</span>
+          <div className="destination-grid" role="group" aria-labelledby="destination-label">
+            {peers.map(peer => <button type="button" className="destination" key={peer.id}
+              disabled={busy || hasAttempt} aria-pressed={recipient?.id === peer.id} onClick={() => setRecipient(peer)}>
+              <span className="destination-name">{peer.name}</span><span className="muted small">Paired device · No passcode</span>
+            </button>)}
+            <button type="button" className="destination" disabled={busy || hasAttempt} aria-pressed={!recipient} onClick={() => setRecipient(null)}>
+              <span className="destination-name">Share a link</span><span className="muted small">Link or QR · Passcode required</span>
+            </button>
+          </div>
+          {recipient && !peers.some(peer => peer.id === recipient.id) && <p role="status" className="error">{recipient.name} is unavailable. Reconnect it or choose another destination.</p>}
+          {!peers.length && <div><button type="button" className="button secondary" onClick={onConnect}>Connect your phone or laptop</button></div>}
         </div>
         <div className={`field file-picker${dragging ? ' is-dragging' : ''}`}
           onDragOver={(event) => {
@@ -204,11 +211,11 @@ function UploadPage({ peers }: { peers: RememberedDevice[] }) {
           </div>
         </div> : <p className="muted small">Your paired device is verified. No passcode needed.</p>}
         <div className="send-actions">
-          <p className="expires"><ClockIcon size={14} />Links last 10 minutes after upload.</p>
+          <p className="expires"><ClockIcon size={14} />Files are available for 10 minutes after upload.</p>
           {hasAttempt && progress !== 1 && <button type="button" className="button secondary"
             onClick={cancelUpload} disabled={canceling}>{canceling ? 'Canceling…' : 'Cancel upload'}</button>}
           <button type="submit" className="button primary" disabled={!file || (!recipient && !passcode) || busy}>
-            {busy ? 'Sending…' : retryCompletion ? 'Retry sharing' : 'Send file'}<ArrowRightIcon size={17} />
+            {busy ? 'Sending…' : retryCompletion ? 'Retry delivery' : recipient ? `Send to ${recipient.name}` : 'Create share link'}<ArrowRightIcon size={17} />
           </button>
         </div>
         {error && <p role="alert" className="error">{error}</p>}

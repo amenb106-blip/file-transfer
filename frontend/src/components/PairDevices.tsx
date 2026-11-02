@@ -78,7 +78,11 @@ export default function PairDevices({ token, onConnected }: { token: string | nu
   </div>
 
   return <section className="field" aria-label="Connect devices">
-    <h2 className="device-heading">{token ? 'Connect this device' : 'Add a device'}</h2>
+    {!token && <ol className="pairing-steps">
+      <li><strong>Scan the QR</strong><span>Create a QR here and scan it with your other device.</span></li>
+      <li><strong>Request connection</strong><span>Save the other device if needed, then request to connect.</span></li>
+      <li><strong>Approve here</strong><span>Check its name and approve. Keep this page open until connected.</span></li>
+    </ol>}
     {token ? <>
       {pairing && <p>Connect this browser to <strong>{pairing.owner_name}</strong>?</p>}
       {watchId ? <p role="status">Waiting for approval on {pairing?.owner_name}…</p>
